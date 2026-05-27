@@ -12,9 +12,8 @@ Safe to re-run: implement your inserts with ON CONFLICT DO NOTHING.
 import json
 import os
 import sys
-import uuid
-import hashlib
 
+from argon2 import PasswordHasher
 import psycopg2
 from psycopg2.extras import execute_values
 
@@ -172,26 +171,29 @@ def seed_users(cur):
     
     users = []
     passwords = []
+    ph = PasswordHasher()
     
     for d in data:
         user_id = d["user_id"]
         users.append((
             user_id, d["full_name"], d["email"], d.get("phone"), d.get("date_of_birth"),
-            d.get("secret_question"), d.get("secret_answer"),
+            d.get("secret_question"),
             d.get("registered_at"), d.get("is_active", True)
         ))
         
-        salt = uuid.uuid4().hex
         pwd = d["password"]
-        # Basic salted hash approach
-        hashed_pwd = hashlib.sha256((pwd + salt).encode('utf-8')).hexdigest()
-        passwords.append((user_id, hashed_pwd, salt))
+        hashed_pwd = ph.hash(pwd)
+        
+        secret_answer = d.get("secret_answer")
+        hashed_secret_answer = ph.hash(secret_answer) if secret_answer else None
+            
+        passwords.append((user_id, hashed_pwd, hashed_secret_answer))
         
     insert_many(cur, "users", [
         "user_id", "full_name", "email", "phone", "date_of_birth",
-        "secret_question", "secret_answer", "registered_at", "is_active"
+        "secret_question", "registered_at", "is_active"
     ], users)
-    insert_many(cur, "user_passwords", ["user_id", "password_hash", "salt"], passwords)
+    insert_many(cur, "user_passwords", ["user_id", "password_hash", "secret_answer_hash"], passwords)
 
 
 def seed_national_rail_bookings(cur):

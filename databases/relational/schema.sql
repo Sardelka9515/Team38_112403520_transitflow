@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS users (
     phone VARCHAR(50),
     date_of_birth DATE,
     secret_question VARCHAR(255),
-    secret_answer VARCHAR(255),
     registered_at TIMESTAMPTZ DEFAULT NOW(),
     is_active BOOLEAN DEFAULT TRUE
 );
@@ -44,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS user_passwords (
     user_id VARCHAR(50) PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     password_hash VARCHAR(255) NOT NULL,
-    salt VARCHAR(255)
+    secret_answer_hash VARCHAR(255)
 );
 
 -- Stations Base
