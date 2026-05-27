@@ -12,6 +12,8 @@ Safe to re-run: implement your inserts with ON CONFLICT DO NOTHING.
 import json
 import os
 import sys
+import uuid
+import hashlib
 
 import psycopg2
 from psycopg2.extras import execute_values
@@ -56,63 +58,227 @@ def insert_many(cur, table, columns, rows):
 
 def seed_metro_stations(cur):
     data = load("metro_stations.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    # Each item in `data` is a dict — inspect the JSON to see available fields.
-    pass
+    rows = [(d["station_id"], d["name"]) for d in data]
+    insert_many(cur, "metro_stations", ["station_id", "name"], rows)
 
 
 def seed_national_rail_stations(cur):
     data = load("national_rail_stations.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    rows = [(d["station_id"], d["name"]) for d in data]
+    insert_many(cur, "national_rail_stations", ["station_id", "name"], rows)
 
 
 def seed_metro_schedules(cur):
     data = load("metro_schedules.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    
+    schedules = []
+    stops = []
+    days = []
+    
+    for d in data:
+        sch_id = d["schedule_id"]
+        schedules.append((
+            sch_id, d["line"], d["direction"], d["origin_station_id"],
+            d["destination_station_id"], d["first_train_time"], d["last_train_time"],
+            d["base_fare_usd"], d["per_stop_rate_usd"], d["frequency_min"]
+        ))
+        
+        for idx, station_id in enumerate(d.get("stops_in_order", [])):
+            travel_time = d.get("travel_time_from_origin_min", {}).get(station_id, 0)
+            stops.append((
+                sch_id, station_id, idx + 1, travel_time
+            ))
+            
+        for day in d.get("operates_on", []):
+            days.append((sch_id, day))
+            
+    insert_many(cur, "metro_schedules", [
+        "schedule_id", "line", "direction", "origin_station_id", "destination_station_id",
+        "first_train_time", "last_train_time", "base_fare_usd", "per_stop_rate_usd", "frequency_min"
+    ], schedules)
+    insert_many(cur, "metro_schedule_stops", ["schedule_id", "station_id", "stop_order", "travel_time_from_origin_min"], stops)
+    insert_many(cur, "metro_schedule_days", ["schedule_id", "day_of_week"], days)
 
 
 def seed_national_rail_schedules(cur):
     data = load("national_rail_schedules.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    
+    schedules = []
+    stops = []
+    fares = []
+    days = []
+    
+    for d in data:
+        sch_id = d["schedule_id"]
+        schedules.append((
+            sch_id, d["line"], d["service_type"], d["direction"],
+            d["origin_station_id"], d["destination_station_id"],
+            d["first_train_time"], d["last_train_time"], d["frequency_min"]
+        ))
+        
+        passed_through = set(d.get("passed_through_stations", []))
+        for idx, station_id in enumerate(d.get("stops_in_order", [])):
+            is_passed_through = station_id in passed_through
+            travel_time = d.get("travel_time_from_origin_min", {}).get(station_id, 0)
+            stops.append((
+                sch_id, station_id, idx + 1,
+                travel_time, is_passed_through
+            ))
+            
+        for fare_class, prices in d.get("fare_classes", {}).items():
+            fares.append((
+                sch_id, fare_class, prices["base_fare_usd"], prices["per_stop_rate_usd"]
+            ))
+            
+        for day in d.get("operates_on", []):
+            days.append((sch_id, day))
+            
+    insert_many(cur, "national_rail_schedules", [
+        "schedule_id", "line", "service_type", "direction", "origin_station_id",
+        "destination_station_id", "first_train_time", "last_train_time", "frequency_min"
+    ], schedules)
+    insert_many(cur, "national_rail_schedule_stops", [
+        "schedule_id", "station_id", "stop_order", "travel_time_from_origin_min", "is_passed_through"
+    ], stops)
+    insert_many(cur, "national_rail_schedule_fares", ["schedule_id", "fare_class", "base_fare_usd", "per_stop_rate_usd"], fares)
+    insert_many(cur, "national_rail_schedule_days", ["schedule_id", "day_of_week"], days)
 
 
 def seed_seat_layouts(cur):
     data = load("national_rail_seat_layouts.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    
+    layouts = []
+    coaches = []
+    seats = []
+    
+    for d in data:
+        layout_id = d["layout_id"]
+        layouts.append((layout_id, d["schedule_id"]))
+        
+        for c in d.get("coaches", []):
+            coach_id = f"{layout_id}_{c['coach']}"
+            coaches.append((coach_id, layout_id, c["coach"], c["fare_class"]))
+            
+            for s in c.get("seats", []):
+                seats.append((s["seat_id"], coach_id, s["row"], s["column"]))
+                
+    insert_many(cur, "national_rail_seat_layouts", ["layout_id", "schedule_id"], layouts)
+    insert_many(cur, "national_rail_coaches", ["coach_id", "layout_id", "coach_name", "fare_class"], coaches)
+    insert_many(cur, "national_rail_seats", ["seat_id", "coach_id", "row", '\"column\"'], seats)
 
 
 def seed_users(cur):
     data = load("registered_users.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    
+    users = []
+    passwords = []
+    
+    for d in data:
+        user_id = d["user_id"]
+        users.append((
+            user_id, d["full_name"], d["email"], d.get("phone"), d.get("date_of_birth"),
+            d.get("secret_question"), d.get("secret_answer"),
+            d.get("registered_at"), d.get("is_active", True)
+        ))
+        
+        salt = uuid.uuid4().hex
+        pwd = d["password"]
+        # Basic salted hash approach
+        hashed_pwd = hashlib.sha256((pwd + salt).encode('utf-8')).hexdigest()
+        passwords.append((user_id, hashed_pwd, salt))
+        
+    insert_many(cur, "users", [
+        "user_id", "full_name", "email", "phone", "date_of_birth",
+        "secret_question", "secret_answer", "registered_at", "is_active"
+    ], users)
+    insert_many(cur, "user_passwords", ["user_id", "password_hash", "salt"], passwords)
 
 
 def seed_national_rail_bookings(cur):
     data = load("bookings.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    layouts_data = load("national_rail_seat_layouts.json")
+    
+    # Map (schedule_id, coach_name) -> coach_id
+    # We need to find layout_id for a schedule to resolve the coach_id
+    schedule_to_layout = {l["schedule_id"]: l["layout_id"] for l in layouts_data}
+    
+    bookings = []
+    for d in data:
+        sch_id = d["schedule_id"]
+        coach_name = d.get("coach")
+        
+        coach_id = None
+        if coach_name and sch_id in schedule_to_layout:
+            layout_id = schedule_to_layout[sch_id]
+            coach_id = f"{layout_id}_{coach_name}"
+            
+        bookings.append((
+            d["booking_id"], d["user_id"], sch_id,
+            d["origin_station_id"], d["destination_station_id"],
+            d["travel_date"], d["departure_time"], d["ticket_type"],
+            d["fare_class"], coach_name, coach_id, d.get("seat_id"),
+            d["stops_travelled"], d["amount_usd"], d["status"],
+            d["booked_at"], d.get("travelled_at")
+        ))
+        
+    insert_many(cur, "national_rail_bookings", [
+        "booking_id", "user_id", "schedule_id", "origin_station_id", "destination_station_id",
+        "travel_date", "departure_time", "ticket_type", "fare_class", "coach", "coach_id", "seat_id",
+        "stops_travelled", "amount_usd", "status", "booked_at", "travelled_at"
+    ], bookings)
 
 
 def seed_metro_travels(cur):
     data = load("metro_travel_history.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    rows = []
+    for d in data:
+        rows.append((
+            d["trip_id"], d["user_id"], d["schedule_id"],
+            d["origin_station_id"], d["destination_station_id"],
+            d["travel_date"], d["ticket_type"], d.get("day_pass_ref"),
+            d["stops_travelled"], d["amount_usd"], d["status"],
+            d["purchased_at"], d.get("travelled_at")
+        ))
+        
+    insert_many(cur, "metro_travel_history", [
+        "trip_id", "user_id", "schedule_id", "origin_station_id", "destination_station_id",
+        "travel_date", "ticket_type", "day_pass_ref", "stops_travelled", "amount_usd",
+        "status", "purchased_at", "travelled_at"
+    ], rows)
 
 
 def seed_payments(cur):
     data = load("payments.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    metro_payments = []
+    rail_payments = []
+    
+    for d in data:
+        bid = d["booking_id"]
+        row = (d["payment_id"], bid, d["amount_usd"], d["method"], d["status"], d["paid_at"])
+        if bid.startswith("MT"):
+            metro_payments.append(row)
+        else:
+            rail_payments.append(row)
+            
+    insert_many(cur, "metro_payments", ["payment_id", "trip_id", "amount_usd", "method", "status", "paid_at"], metro_payments)
+    insert_many(cur, "national_rail_payments", ["payment_id", "booking_id", "amount_usd", "method", "status", "paid_at"], rail_payments)
 
 
 def seed_feedback(cur):
     data = load("feedback.json")
-    # TODO: Design your table schema, then implement the INSERT logic here.
-    pass
+    metro_feedbacks = []
+    rail_feedbacks = []
+    
+    for d in data:
+        bid = d["booking_id"]
+        row = (d["feedback_id"], bid, d["user_id"], d["rating"], d.get("comment"), d["submitted_at"])
+        if bid.startswith("MT"):
+            metro_feedbacks.append(row)
+        else:
+            rail_feedbacks.append(row)
+            
+    insert_many(cur, "metro_feedbacks", ["feedback_id", "trip_id", "user_id", "rating", "comment", "submitted_at"], metro_feedbacks)
+    insert_many(cur, "national_rail_feedbacks", ["feedback_id", "booking_id", "user_id", "rating", "comment", "submitted_at"], rail_feedbacks)
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
