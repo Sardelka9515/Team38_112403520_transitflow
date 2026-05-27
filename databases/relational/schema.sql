@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS national_rail_seats (
     seat_id VARCHAR(50) PRIMARY KEY,
     coach_id VARCHAR(50) REFERENCES national_rail_coaches(coach_id) ON DELETE CASCADE,
     row INT NOT NULL,
-    column VARCHAR(5) NOT NULL
+    "column" VARCHAR(5) NOT NULL
 );
 
 -- Transactions
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS metro_travel_history (
     travel_date DATE NOT NULL,
     ticket_type VARCHAR(50) NOT NULL,
     day_pass_ref VARCHAR(50),
-    stops_travelled INT NOT NULL,
+    stops_travelled INT,
     amount_usd NUMERIC(10, 2) NOT NULL,
     status VARCHAR(50) DEFAULT 'completed',
     purchased_at TIMESTAMPTZ DEFAULT NOW(),
@@ -237,4 +237,4 @@ CREATE TABLE IF NOT EXISTS policy_documents (
 );
 
 -- Index for fast cosine similarity search
-CREATE INDEX IF NOT EXISTS ON policy_documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS policy_documents_embedding_idx ON policy_documents USING hnsw (embedding vector_cosine_ops);
