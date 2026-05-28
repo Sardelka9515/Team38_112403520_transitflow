@@ -163,7 +163,7 @@ def seed_seat_layouts(cur):
                 
     insert_many(cur, "national_rail_seat_layouts", ["layout_id", "schedule_id"], layouts)
     insert_many(cur, "national_rail_coaches", ["coach_id", "layout_id", "coach_name", "fare_class"], coaches)
-    insert_many(cur, "national_rail_seats", ["seat_id", "coach_id", "row", '\"column\"'], seats)
+    insert_many(cur, "national_rail_seats", ["seat_id", "coach_id", "row", "seat_column"], seats)
 
 
 def seed_users(cur):
@@ -218,14 +218,14 @@ def seed_national_rail_bookings(cur):
             d["booking_id"], d["user_id"], sch_id,
             d["origin_station_id"], d["destination_station_id"],
             d["travel_date"], d["departure_time"], d["ticket_type"],
-            d["fare_class"], coach_name, coach_id, d.get("seat_id"),
+            d["fare_class"], coach_id, d.get("seat_id"),
             d["stops_travelled"], d["amount_usd"], d["status"],
             d["booked_at"], d.get("travelled_at")
         ))
         
     insert_many(cur, "national_rail_bookings", [
         "booking_id", "user_id", "schedule_id", "origin_station_id", "destination_station_id",
-        "travel_date", "departure_time", "ticket_type", "fare_class", "coach", "coach_id", "seat_id",
+        "travel_date", "departure_time", "ticket_type", "fare_class", "coach_id", "seat_id",
         "stops_travelled", "amount_usd", "status", "booked_at", "travelled_at"
     ], bookings)
 

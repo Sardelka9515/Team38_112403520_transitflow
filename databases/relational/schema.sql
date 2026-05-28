@@ -135,10 +135,11 @@ CREATE TABLE IF NOT EXISTS national_rail_coaches (
 );
 
 CREATE TABLE IF NOT EXISTS national_rail_seats (
-    seat_id VARCHAR(50) PRIMARY KEY,
+    seat_id VARCHAR(50) NOT NULL,
     coach_id VARCHAR(50) REFERENCES national_rail_coaches(coach_id) ON DELETE CASCADE,
     row INT NOT NULL,
-    "column" VARCHAR(5) NOT NULL
+    seat_column VARCHAR(5) NOT NULL,
+    PRIMARY KEY (coach_id, seat_id)
 );
 
 -- Transactions
@@ -152,9 +153,9 @@ CREATE TABLE IF NOT EXISTS national_rail_bookings (
     departure_time TIME NOT NULL,
     ticket_type VARCHAR(50) NOT NULL,
     fare_class VARCHAR(50) NOT NULL,
-    coach VARCHAR(50),
-    coach_id VARCHAR(50) REFERENCES national_rail_coaches(coach_id),
-    seat_id VARCHAR(50) REFERENCES national_rail_seats(seat_id),
+    coach_id VARCHAR(50),
+    seat_id VARCHAR(50),
+    FOREIGN KEY (coach_id, seat_id) REFERENCES national_rail_seats(coach_id, seat_id),
     stops_travelled INT NOT NULL,
     amount_usd NUMERIC(10, 2) NOT NULL,
     status VARCHAR(50) DEFAULT 'confirmed',
