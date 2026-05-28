@@ -118,6 +118,15 @@ def seed_national_rail_schedules(cur):
     # Extracts schedule details including pass-through stations and fare classes.
     data = load("national_rail_schedules.json")
     
+    # Map (line, direction) -> { "stops": [...], "times": {...} } from normal schedules
+    normal_routes = {}
+    for d in data:
+        if d.get("service_type") == "normal":
+            normal_routes[(d["line"], d["direction"])] = {
+                "stops": d.get("stops_in_order", []),
+                "times": d.get("travel_time_from_origin_min", {})
+            }
+
     schedules = []
     stops = []
     fares = []
@@ -126,20 +135,36 @@ def seed_national_rail_schedules(cur):
     # Process each national rail schedule entry from the JSON data.
     for d in data:
         sch_id = d["schedule_id"]
+        line = d["line"]
+        direction = d["direction"]
+        service_type = d["service_type"]
+        
         schedules.append((
-            sch_id, d["line"], d["service_type"], d["direction"],
+            sch_id, line, service_type, direction,
             d["origin_station_id"], d["destination_station_id"],
             d["first_train_time"], d["last_train_time"], d["frequency_min"]
         ))
         
-        # Track station stops and mark whether the train only passes through them.
         passed_through = set(d.get("passed_through_stations", []))
-        for idx, station_id in enumerate(d.get("stops_in_order", [])):
-            is_passed_through = station_id in passed_through
-            travel_time = d.get("travel_time_from_origin_min", {}).get(station_id, 0)
+        
+        if service_type == "express" and (line, direction) in normal_routes:
+            full_route = normal_routes[(line, direction)]["stops"]
+            normal_times = normal_routes[(line, direction)]["times"]
+        else:
+            full_route = d.get("stops_in_order", [])
+            normal_times = {}
+
+        for idx, station_id in enumerate(full_route):
+            is_passed = station_id in passed_through
+            
+            if is_passed:
+                travel_time = normal_times.get(station_id, 0)
+            else:
+                travel_time = d.get("travel_time_from_origin_min", {}).get(station_id, 0)
+                
             stops.append((
                 sch_id, station_id, idx + 1,
-                travel_time, is_passed_through
+                travel_time, is_passed
             ))
             
         # Parse available fare classes and pricing rates for the schedule.
