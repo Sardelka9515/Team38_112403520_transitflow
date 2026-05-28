@@ -27,11 +27,15 @@ from skeleton import config as cfg
 
 
 def load(filename):
+    # Helper function to load json data from the mock data directory.
+    # Returns a parsed dictionary or list from the specified file.
     with open(os.path.join(DATA_DIR, filename), encoding="utf-8") as f:
         return json.load(f)
 
 
 def connect():
+    # Establish and return a connection to the PostgreSQL database.
+    # Uses configuration parameters defined in the config module.
     return psycopg2.connect(
         host=cfg.PG_HOST,
         port=cfg.PG_PORT,
@@ -43,6 +47,7 @@ def connect():
 
 def insert_many(cur, table, columns, rows):
     """Bulk insert with ON CONFLICT DO NOTHING. Returns row count inserted."""
+    # Skip operation if there is no data to insert.
     if not rows:
         return 0
     sql = (
@@ -56,24 +61,31 @@ def insert_many(cur, table, columns, rows):
 # ── seeders ──────────────────────────────────────────────────────────────────
 
 def seed_metro_stations(cur):
+    # Seed metro stations from json file.
+    # Extracts station IDs and names to populate the metro_stations table.
     data = load("metro_stations.json")
     rows = [(d["station_id"], d["name"]) for d in data]
     insert_many(cur, "metro_stations", ["station_id", "name"], rows)
 
 
 def seed_national_rail_stations(cur):
+    # Seed national rail stations from json file.
+    # Extracts station IDs and names to populate the national_rail_stations table.
     data = load("national_rail_stations.json")
     rows = [(d["station_id"], d["name"]) for d in data]
     insert_many(cur, "national_rail_stations", ["station_id", "name"], rows)
 
 
 def seed_metro_schedules(cur):
+    # Seed metro schedules, stops, and operating days.
+    # Parses nested schedule data into multiple relational tables.
     data = load("metro_schedules.json")
     
     schedules = []
     stops = []
     days = []
     
+    # Process each schedule entry from the JSON data.
     for d in data:
         sch_id = d["schedule_id"]
         schedules.append((
@@ -82,12 +94,14 @@ def seed_metro_schedules(cur):
             d["base_fare_usd"], d["per_stop_rate_usd"], d["frequency_min"]
         ))
         
+        # Iterate through the stops in order to preserve the sequence of the route.
         for idx, station_id in enumerate(d.get("stops_in_order", [])):
             travel_time = d.get("travel_time_from_origin_min", {}).get(station_id, 0)
             stops.append((
                 sch_id, station_id, idx + 1, travel_time
             ))
             
+        # Collect the operating days for this specific schedule.
         for day in d.get("operates_on", []):
             days.append((sch_id, day))
             
@@ -100,6 +114,8 @@ def seed_metro_schedules(cur):
 
 
 def seed_national_rail_schedules(cur):
+    # Seed national rail schedules, stops, fares, and operating days.
+    # Extracts schedule details including pass-through stations and fare classes.
     data = load("national_rail_schedules.json")
     
     schedules = []
@@ -107,6 +123,7 @@ def seed_national_rail_schedules(cur):
     fares = []
     days = []
     
+    # Process each national rail schedule entry from the JSON data.
     for d in data:
         sch_id = d["schedule_id"]
         schedules.append((
@@ -115,6 +132,7 @@ def seed_national_rail_schedules(cur):
             d["first_train_time"], d["last_train_time"], d["frequency_min"]
         ))
         
+        # Track station stops and mark whether the train only passes through them.
         passed_through = set(d.get("passed_through_stations", []))
         for idx, station_id in enumerate(d.get("stops_in_order", [])):
             is_passed_through = station_id in passed_through
@@ -124,11 +142,13 @@ def seed_national_rail_schedules(cur):
                 travel_time, is_passed_through
             ))
             
+        # Parse available fare classes and pricing rates for the schedule.
         for fare_class, prices in d.get("fare_classes", {}).items():
             fares.append((
                 sch_id, fare_class, prices["base_fare_usd"], prices["per_stop_rate_usd"]
             ))
             
+        # Collect the operating days for this national rail schedule.
         for day in d.get("operates_on", []):
             days.append((sch_id, day))
             
@@ -144,20 +164,25 @@ def seed_national_rail_schedules(cur):
 
 
 def seed_seat_layouts(cur):
+    # Seed seat layouts, coaches, and individual seats for national rail.
+    # Generates unique coach IDs and maps seats to their respective layouts.
     data = load("national_rail_seat_layouts.json")
     
     layouts = []
     coaches = []
     seats = []
     
+    # Process each layout mapping schedules to seat structures.
     for d in data:
         layout_id = d["layout_id"]
         layouts.append((layout_id, d["schedule_id"]))
         
+        # Extract coach details for the layout.
         for c in d.get("coaches", []):
             coach_id = f"{layout_id}_{c['coach']}"
             coaches.append((coach_id, layout_id, c["coach"], c["fare_class"]))
             
+            # Map each individual seat to its corresponding coach.
             for s in c.get("seats", []):
                 seats.append((s["seat_id"], coach_id, s["row"], s["column"]))
                 
@@ -167,12 +192,15 @@ def seed_seat_layouts(cur):
 
 
 def seed_users(cur):
+    # Seed registered users and their hashed passwords.
+    # Uses argon2 to securely hash passwords before inserting them.
     data = load("registered_users.json")
     
     users = []
     passwords = []
     ph = PasswordHasher()
     
+    # Process and hash passwords for each user profile.
     for d in data:
         user_id = d["user_id"]
         users.append((
@@ -184,6 +212,7 @@ def seed_users(cur):
         pwd = d["password"]
         hashed_pwd = ph.hash(pwd)
         
+        # Hash the secret answer only if it is provided.
         secret_answer = d.get("secret_answer")
         hashed_secret_answer = ph.hash(secret_answer) if secret_answer else None
             
@@ -197,6 +226,8 @@ def seed_users(cur):
 
 
 def seed_national_rail_bookings(cur):
+    # Seed national rail bookings.
+    # Resolves the correct coach ID for each booking based on the schedule layout.
     data = load("bookings.json")
     layouts_data = load("national_rail_seat_layouts.json")
     
@@ -205,11 +236,13 @@ def seed_national_rail_bookings(cur):
     schedule_to_layout = {l["schedule_id"]: l["layout_id"] for l in layouts_data}
     
     bookings = []
+    # Process bookings and resolve coach references.
     for d in data:
         sch_id = d["schedule_id"]
         coach_name = d.get("coach")
         
         coach_id = None
+        # Check if the booking has a specific coach and matches a valid layout.
         if coach_name and sch_id in schedule_to_layout:
             layout_id = schedule_to_layout[sch_id]
             coach_id = f"{layout_id}_{coach_name}"
@@ -231,8 +264,11 @@ def seed_national_rail_bookings(cur):
 
 
 def seed_metro_travels(cur):
+    # Seed metro travel history.
+    # Inserts trip records including ticket types and payment statuses.
     data = load("metro_travel_history.json")
     rows = []
+    # Format and extract each metro travel history record.
     for d in data:
         rows.append((
             d["trip_id"], d["user_id"], d["schedule_id"],
@@ -250,13 +286,17 @@ def seed_metro_travels(cur):
 
 
 def seed_payments(cur):
+    # Seed payments for both metro and national rail.
+    # Segregates payment records based on the booking ID prefix.
     data = load("payments.json")
     metro_payments = []
     rail_payments = []
     
+    # Iterate through transactions and route them based on the booking prefix.
     for d in data:
         bid = d["booking_id"]
         row = (d["payment_id"], bid, d["amount_usd"], d["method"], d["status"], d["paid_at"])
+        # IDs starting with 'MT' indicate Metro travel payments, otherwise Rail bookings.
         if bid.startswith("MT"):
             metro_payments.append(row)
         else:
@@ -267,13 +307,17 @@ def seed_payments(cur):
 
 
 def seed_feedback(cur):
+    # Seed user feedbacks for both metro and national rail.
+    # Segregates feedback records based on the booking ID prefix.
     data = load("feedback.json")
     metro_feedbacks = []
     rail_feedbacks = []
     
+    # Iterate through feedback records and route them accordingly.
     for d in data:
         bid = d["booking_id"]
         row = (d["feedback_id"], bid, d["user_id"], d["rating"], d.get("comment"), d["submitted_at"])
+        # IDs starting with 'MT' belong to Metro trips, otherwise Rail bookings.
         if bid.startswith("MT"):
             metro_feedbacks.append(row)
         else:
@@ -286,6 +330,8 @@ def seed_feedback(cur):
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    # Main function to execute all seeders in the correct dependency order.
+    # Manages the transaction, committing on success and rolling back on failure.
     print("Connecting to PostgreSQL...")
     conn = connect()
     conn.autocommit = False
