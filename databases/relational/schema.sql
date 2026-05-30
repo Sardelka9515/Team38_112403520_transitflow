@@ -156,6 +156,10 @@ CREATE TABLE IF NOT EXISTS national_rail_bookings (
     coach_id VARCHAR(50),
     seat_id VARCHAR(50),
     FOREIGN KEY (coach_id, seat_id) REFERENCES national_rail_seats(coach_id, seat_id),
+    CONSTRAINT national_rail_bookings_seat_pair_chk CHECK (
+        (coach_id IS NULL AND seat_id IS NULL) OR
+        (coach_id IS NOT NULL AND seat_id IS NOT NULL)
+    ),
     stops_travelled INT NOT NULL,
     amount_usd NUMERIC(10, 2) NOT NULL,
     status VARCHAR(50) DEFAULT 'confirmed',
