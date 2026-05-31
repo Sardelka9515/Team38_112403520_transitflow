@@ -498,7 +498,51 @@ def register_user(
     NOTE: passwords are stored as plain text here intentionally for teaching
     purposes. In production, replace with a salted hash (e.g. bcrypt).
     """
-    raise NotImplementedError("TODO: implement after designing your schema")
+    from argon2 import PasswordHasher
+
+    conn = _connect()
+    conn.autocommit = False
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Check for duplicate email
+            cur.execute("SELECT 1 FROM users WHERE email = %s", (email.lower(),))
+            if cur.fetchone():
+                conn.rollback()
+                return (False, "An account with this email already exists.")
+
+            # Generate next user_id (RU + next sequential number)
+            cur.execute("SELECT user_id FROM users ORDER BY user_id DESC LIMIT 1")
+            last = cur.fetchone()
+            if last:
+                num = int(last["user_id"].replace("RU", "")) + 1
+            else:
+                num = 1
+            user_id = f"RU{num:02d}"
+
+            full_name = f"{first_name} {surname}"
+            date_of_birth = f"{year_of_birth}-01-01"  # approximate
+
+            cur.execute("""
+                INSERT INTO users (user_id, full_name, email, date_of_birth, secret_question)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, full_name, email.lower(), date_of_birth, secret_question))
+
+            ph = PasswordHasher()
+            hashed_password = ph.hash(password)
+            hashed_answer = ph.hash(secret_answer.lower())
+
+            cur.execute("""
+                INSERT INTO user_passwords (user_id, password_hash, secret_answer_hash)
+                VALUES (%s, %s, %s)
+            """, (user_id, hashed_password, hashed_answer))
+
+            conn.commit()
+            return (True, user_id)
+    except Exception as e:
+        conn.rollback()
+        return (False, f"Registration failed: {e}")
+    finally:
+        conn.close()
 
 
 def login_user(email: str, password: str) -> Optional[dict]:
@@ -506,22 +550,100 @@ def login_user(email: str, password: str) -> Optional[dict]:
     Verify credentials. Returns a user dict on success or None on failure.
     Dict keys: user_id, email, full_name, first_name, surname, phone, date_of_birth, is_active.
     """
-    raise NotImplementedError("TODO: implement after designing your schema")
+    from argon2 import PasswordHasher
+    from argon2.exceptions import VerifyMismatchError
+
+    sql = """
+        SELECT u.user_id, u.email, u.full_name, u.phone,
+               u.date_of_birth::text, u.is_active,
+               p.password_hash
+        FROM users u
+        JOIN user_passwords p ON p.user_id = u.user_id
+        WHERE u.email = %s AND u.is_active = TRUE
+    """
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, (email.lower(),))
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            ph = PasswordHasher()
+            try:
+                ph.verify(row["password_hash"], password)
+            except VerifyMismatchError:
+                return None
+
+            # Split full_name into first_name and surname for the UI
+            parts = row["full_name"].split(" ", 1)
+            first_name = parts[0]
+            surname = parts[1] if len(parts) > 1 else ""
+
+            return {
+                "user_id": row["user_id"],
+                "email": row["email"],
+                "full_name": row["full_name"],
+                "first_name": first_name,
+                "surname": surname,
+                "phone": row["phone"],
+                "date_of_birth": row["date_of_birth"],
+                "is_active": row["is_active"],
+            }
 
 
 def get_user_secret_question(email: str) -> Optional[str]:
     """Return the secret question for a registered email, or None if not found."""
-    raise NotImplementedError("TODO: implement after designing your schema")
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT secret_question FROM users WHERE email = %s",
+                (email.lower(),),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
 
 
 def verify_secret_answer(email: str, answer: str) -> bool:
     """Return True if the provided answer matches the stored secret answer (case-insensitive)."""
-    raise NotImplementedError("TODO: implement after designing your schema")
+    from argon2 import PasswordHasher
+    from argon2.exceptions import VerifyMismatchError
+
+    sql = """
+        SELECT p.secret_answer_hash
+        FROM user_passwords p
+        JOIN users u ON u.user_id = p.user_id
+        WHERE u.email = %s
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (email.lower(),))
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return False
+
+            ph = PasswordHasher()
+            try:
+                ph.verify(row[0], answer.lower())
+                return True
+            except VerifyMismatchError:
+                return False
 
 
 def update_password(email: str, new_password: str) -> bool:
     """Update the password for a user. Returns True if the row was updated."""
-    raise NotImplementedError("TODO: implement after designing your schema")
+    from argon2 import PasswordHasher
+
+    ph = PasswordHasher()
+    hashed = ph.hash(new_password)
+    sql = """
+        UPDATE user_passwords
+        SET password_hash = %s
+        WHERE user_id = (SELECT user_id FROM users WHERE email = %s)
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (hashed, email.lower()))
+            return cur.rowcount > 0
 
 
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────
