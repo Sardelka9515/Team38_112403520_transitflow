@@ -48,20 +48,27 @@ Four logical groupings, each forming a small cluster of tables:
 
 | Cluster | Table | Purpose | Key relationships |
 |---|---|---|---|
-| Infra | `metro_stations` | Station catalog | — |
-| Infra | `metro_station_lines` | Many-to-many: station ↔ line | FK → metro_stations |
-| Infra | `national_rail_stations` | Station catalog | — |
-| Infra | `national_rail_station_lines` | M2M station ↔ line | FK → national_rail_stations |
-| Infra | `metro_schedules` | Per-line schedule header + fare structure | — |
-| Infra | `metro_schedule_stops` | Stop sequence (order matters) | FK → schedule, station |
-| Infra | `national_rail_schedules` | Schedule header, normal vs express, dual fare classes | — |
-| Infra | `national_rail_schedule_stops` | Stop sequence + departure_time per stop | FK → schedule, station |
-| Infra | `seat_layouts` | Coach/row/column/fare_class per schedule | FK → schedule |
-| Identity | `users` | Profile + auth + secret Q/A | — |
-| Tx | `national_rail_bookings` | Advance bookings w/ assigned seat | FK → user, schedule, origin, destination |
-| Tx | `metro_travels` | Same-day tap-in trips | FK → user, schedule, origin, destination |
-| Tx | `payments` | Payment records for both networks | FK → user; one-of(booking, trip) |
-| Feedback | `feedback` | Post-travel ratings | FK → user; one-of(booking, trip) |
+| Identity | `users` | User profile details and registration info | — |
+| Identity | `user_passwords` | Password and secret answer hashes | FK → `users` |
+| Infra | `metro_stations` | Metro station catalog | — |
+| Infra | `national_rail_stations` | National Rail station catalog | — |
+| Infra | `metro_schedules` | Metro line schedule header and fare rates | FK → `metro_stations` (origin, destination) |
+| Infra | `metro_schedule_stops` | Ordered list of stops and travel times for metro schedules | FK → `metro_schedules`, `metro_stations` |
+| Infra | `metro_schedule_days` | Days of the week when metro schedules run | FK → `metro_schedules` |
+| Infra | `national_rail_schedules` | National Rail schedule header and frequency | FK → `national_rail_stations` (origin, destination) |
+| Infra | `national_rail_schedule_stops` | Ordered list of stops, travel times, and pass-through status for rail schedules | FK → `national_rail_schedules`, `national_rail_stations` |
+| Infra | `national_rail_schedule_fares` | Base fare and stop rate per fare class for rail schedules | FK → `national_rail_schedules` |
+| Infra | `national_rail_schedule_days` | Days of the week when rail schedules run | FK → `national_rail_schedules` |
+| Infra | `national_rail_seat_layouts` | Seat layout metadata linking a layout to a rail schedule | FK → `national_rail_schedules` |
+| Infra | `national_rail_coaches` | Coach details indicating carriage name and fare class | FK → `national_rail_seat_layouts` |
+| Infra | `national_rail_seats` | Unique seats per coach (row and column layout) | FK → `national_rail_coaches` (composite PK: `coach_id`, `seat_id`) |
+| Tx | `national_rail_bookings` | Advance rail bookings with assigned coach/seat and ticket details | FK → `users`, `national_rail_schedules`, `national_rail_stations`, `national_rail_seats` |
+| Tx | `metro_travel_history` | Same-day tapped-in metro travel records | FK → `users`, `metro_schedules`, `metro_stations` |
+| Tx | `metro_payments` | Payments for metro travel history records | FK → `metro_travel_history` |
+| Tx | `national_rail_payments` | Payments for rail bookings | FK → `national_rail_bookings` |
+| Feedback | `metro_feedbacks` | Passenger ratings and comments on metro trips | FK → `users`, `metro_travel_history` |
+| Feedback | `national_rail_feedbacks` | Passenger ratings and comments on rail bookings | FK → `users`, `national_rail_bookings` |
+
 
 ### 2.3 Key design decisions and why
 
