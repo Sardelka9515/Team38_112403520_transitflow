@@ -458,7 +458,151 @@ def execute_booking(
         (True, booking_dict)   on success
         (False, error_message) on failure
     """
-    raise NotImplementedError("TODO: implement after designing your schema")
+    conn = _connect()
+    conn.autocommit = False
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # 1. Calculate stops_travelled
+            cur.execute("""
+                SELECT stop_order FROM national_rail_schedule_stops
+                WHERE schedule_id = %s AND station_id = %s AND is_passed_through = FALSE
+            """, (schedule_id, origin_station_id))
+            orig_row = cur.fetchone()
+            if not orig_row:
+                conn.rollback()
+                return (False, f"Origin station {origin_station_id} not found on schedule {schedule_id}.")
+
+            cur.execute("""
+                SELECT stop_order FROM national_rail_schedule_stops
+                WHERE schedule_id = %s AND station_id = %s AND is_passed_through = FALSE
+            """, (schedule_id, destination_station_id))
+            dest_row = cur.fetchone()
+            if not dest_row:
+                conn.rollback()
+                return (False, f"Destination station {destination_station_id} not found on schedule {schedule_id}.")
+
+            stops_travelled = dest_row["stop_order"] - orig_row["stop_order"]
+            if stops_travelled <= 0:
+                conn.rollback()
+                return (False, "Destination must come after origin on this schedule.")
+
+            # 2. Calculate fare
+            fare = query_national_rail_fare(schedule_id, fare_class, stops_travelled)
+            if not fare:
+                conn.rollback()
+                return (False, f"No fare found for {fare_class} class on schedule {schedule_id}.")
+            amount_usd = float(fare["total_fare_usd"])
+
+            # 3. Get departure time from schedule
+            cur.execute(
+                "SELECT first_train_time::text FROM national_rail_schedules WHERE schedule_id = %s",
+                (schedule_id,),
+            )
+            sch_row = cur.fetchone()
+            departure_time = sch_row["first_train_time"] if sch_row else "00:00"
+
+            # 4. Resolve seat
+            actual_coach_id = None
+            actual_seat_id = None
+
+            if seat_id.lower() == "any":
+                available = query_available_seats(schedule_id, travel_date, fare_class)
+                if not available:
+                    conn.rollback()
+                    return (False, "No seats available for this service and date.")
+                selected = auto_select_adjacent_seats(available, 1)
+                if not selected:
+                    conn.rollback()
+                    return (False, "Could not auto-assign a seat.")
+                # Find the full seat info to get coach_id
+                chosen = next(s for s in available if s["seat_id"] == selected[0])
+                actual_seat_id = chosen["seat_id"]
+                # Resolve coach_id from coach_name
+                cur.execute("""
+                    SELECT c.coach_id
+                    FROM national_rail_coaches c
+                    JOIN national_rail_seat_layouts l ON l.layout_id = c.layout_id
+                    WHERE l.schedule_id = %s AND c.coach_name = %s AND c.fare_class = %s
+                """, (schedule_id, chosen["coach"], fare_class))
+                coach_row = cur.fetchone()
+                actual_coach_id = coach_row["coach_id"] if coach_row else None
+            else:
+                # Specific seat requested — find it by seat_id
+                cur.execute("""
+                    SELECT st.seat_id, c.coach_id, c.coach_name
+                    FROM national_rail_seats st
+                    JOIN national_rail_coaches c ON c.coach_id = st.coach_id
+                    JOIN national_rail_seat_layouts l ON l.layout_id = c.layout_id
+                    WHERE l.schedule_id = %s AND c.fare_class = %s AND st.seat_id = %s
+                """, (schedule_id, fare_class, seat_id))
+                seat_row = cur.fetchone()
+                if not seat_row:
+                    conn.rollback()
+                    return (False, f"Seat {seat_id} not found for {fare_class} class on this schedule.")
+
+                # Check if already booked
+                cur.execute("""
+                    SELECT 1 FROM national_rail_bookings
+                    WHERE schedule_id = %s AND travel_date = %s
+                      AND coach_id = %s AND seat_id = %s AND status != 'cancelled'
+                """, (schedule_id, travel_date, seat_row["coach_id"], seat_id))
+                if cur.fetchone():
+                    conn.rollback()
+                    return (False, f"Seat {seat_id} is already booked for this date.")
+
+                actual_coach_id = seat_row["coach_id"]
+                actual_seat_id = seat_row["seat_id"]
+
+            # 5. Create booking
+            booking_id = _gen_booking_id()
+            now = datetime.now(timezone.utc)
+
+            cur.execute("""
+                INSERT INTO national_rail_bookings
+                    (booking_id, user_id, schedule_id,
+                     origin_station_id, destination_station_id,
+                     travel_date, departure_time, ticket_type, fare_class,
+                     coach_id, seat_id, stops_travelled, amount_usd,
+                     status, booked_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'confirmed', %s)
+            """, (
+                booking_id, user_id, schedule_id,
+                origin_station_id, destination_station_id,
+                travel_date, departure_time, ticket_type, fare_class,
+                actual_coach_id, actual_seat_id, stops_travelled, amount_usd,
+                now,
+            ))
+
+            # 6. Create payment record
+            payment_id = _gen_payment_id()
+            cur.execute("""
+                INSERT INTO national_rail_payments
+                    (payment_id, booking_id, amount_usd, method, status, paid_at)
+                VALUES (%s, %s, %s, 'credit_card', 'paid', %s)
+            """, (payment_id, booking_id, amount_usd, now))
+
+            conn.commit()
+            return (True, {
+                "booking_id": booking_id,
+                "schedule_id": schedule_id,
+                "origin_station_id": origin_station_id,
+                "destination_station_id": destination_station_id,
+                "travel_date": travel_date,
+                "departure_time": departure_time,
+                "ticket_type": ticket_type,
+                "fare_class": fare_class,
+                "seat_id": actual_seat_id,
+                "stops_travelled": stops_travelled,
+                "amount_usd": amount_usd,
+                "status": "confirmed",
+                "payment_id": payment_id,
+            })
+
+    except Exception as e:
+        conn.rollback()
+        return (False, f"Booking failed: {e}")
+    finally:
+        conn.close()
 
 
 def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | str]:
@@ -477,7 +621,121 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
         (True, result_dict)  with refund_amount_usd and policy note
         (False, error_msg)
     """
-    raise NotImplementedError("TODO: implement after designing your schema")
+    conn = _connect()
+    conn.autocommit = False
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # 1. Fetch booking and verify ownership
+            cur.execute("""
+                SELECT b.*, s.service_type
+                FROM national_rail_bookings b
+                JOIN national_rail_schedules s ON s.schedule_id = b.schedule_id
+                WHERE b.booking_id = %s
+            """, (booking_id,))
+            booking = cur.fetchone()
+
+            if not booking:
+                conn.rollback()
+                return (False, f"Booking {booking_id} not found.")
+            if booking["user_id"] != user_id:
+                conn.rollback()
+                return (False, "This booking does not belong to you.")
+            if booking["status"] == "cancelled":
+                conn.rollback()
+                return (False, "This booking has already been cancelled.")
+            if booking["status"] == "completed":
+                conn.rollback()
+                return (False, "Cannot cancel a completed journey.")
+
+            # 2. Calculate hours until departure
+            from datetime import date as _date
+            travel_dt = datetime.combine(
+                booking["travel_date"] if isinstance(booking["travel_date"], _date)
+                    else _date.fromisoformat(str(booking["travel_date"])),
+                datetime.strptime(str(booking["departure_time"]), "%H:%M:%S").time()
+                    if ":" in str(booking["departure_time"])
+                    else datetime.strptime(str(booking["departure_time"]), "%H:%M").time(),
+                tzinfo=timezone.utc,
+            )
+            now = datetime.now(timezone.utc)
+            hours_before = (travel_dt - now).total_seconds() / 3600
+
+            # 3. Determine refund based on service type and time window
+            service_type = booking["service_type"]
+            amount = float(booking["amount_usd"])
+
+            if service_type == "express":
+                # RF002: Express service refund policy
+                policy_id = "RF002"
+                if hours_before >= 48:
+                    refund_pct = 100
+                    admin_fee = 1.00
+                    window = "Early cancellation (≥48h before departure)"
+                elif hours_before >= 24:
+                    refund_pct = 50
+                    admin_fee = 1.00
+                    window = "Late cancellation (24–48h before departure)"
+                else:
+                    refund_pct = 0
+                    admin_fee = 0.00
+                    window = "No refund (<24h before departure)"
+            else:
+                # RF001: Normal service refund policy
+                policy_id = "RF001"
+                if hours_before >= 48:
+                    refund_pct = 100
+                    admin_fee = 0.00
+                    window = "Early cancellation (≥48h before departure)"
+                elif hours_before >= 24:
+                    refund_pct = 75
+                    admin_fee = 0.50
+                    window = "Standard cancellation (24–48h before departure)"
+                elif hours_before >= 2:
+                    refund_pct = 50
+                    admin_fee = 0.50
+                    window = "Late cancellation (2–24h before departure)"
+                else:
+                    refund_pct = 0
+                    admin_fee = 0.00
+                    window = "No refund (<2h before departure)"
+
+            refund_amount = round(amount * refund_pct / 100 - admin_fee, 2)
+            if refund_amount < 0:
+                refund_amount = 0.00
+
+            # 4. Update booking status
+            cur.execute("""
+                UPDATE national_rail_bookings
+                SET status = 'cancelled'
+                WHERE booking_id = %s
+            """, (booking_id,))
+
+            # 5. Insert refund payment record if applicable
+            if refund_amount > 0:
+                refund_payment_id = _gen_payment_id()
+                cur.execute("""
+                    INSERT INTO national_rail_payments
+                        (payment_id, booking_id, amount_usd, method, status, paid_at)
+                    VALUES (%s, %s, %s, 'credit_card', 'refunded', %s)
+                """, (refund_payment_id, booking_id, refund_amount, now))
+
+            conn.commit()
+            return (True, {
+                "booking_id": booking_id,
+                "status": "cancelled",
+                "policy_applied": policy_id,
+                "cancellation_window": window,
+                "original_amount_usd": amount,
+                "refund_percent": refund_pct,
+                "admin_fee_usd": admin_fee,
+                "refund_amount_usd": refund_amount,
+            })
+
+    except Exception as e:
+        conn.rollback()
+        return (False, f"Cancellation failed: {e}")
+    finally:
+        conn.close()
 
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
