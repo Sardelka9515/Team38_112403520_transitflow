@@ -107,8 +107,18 @@ Today: {today}
 
 LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first.
 
-When DATA FROM TRANSITFLOW DATABASE is provided, use it as the only source of truth. Do not contradict it or say a route was not found if the data shows one.
-For route results: list every station name in order, note any line changes, and give the total travel time.
+When DATA FROM TRANSITFLOW DATABASE is provided, use it as the only source of truth.
+Do not invent, infer, recalculate, or add stations, lines, fares, travel times, transfers, return trips, schedules, seats, or policies that are not present in the database result.
+Do not contradict the database result or say a route was not found if the data shows one.
+
+For route results:
+- List the station names in the exact order shown in the database result.
+- Use the exact total_time_min or total_fare_usd shown in the database result.
+- If legs are shown, summarize the legs in order.
+- Do not recalculate a different total.
+- Do not add a return trip.
+- If found is false or the result list is empty, say no valid route was found.
+
 Always reply in the same language as the user.
 """.format(today=date.today().isoformat())
 
@@ -237,18 +247,29 @@ TOOLS = [
         "required": ["query"],
     },
     {
-        "name": "find_route",
-        "description": (
-            "Find the best route or path between two stations. Use for ANY question about "
-            "directions, how to get from A to B, fastest route, quickest route, or shortest path. "
-            "Works for metro-only, rail-only, or cross-network journeys. "
-            "Use optimise_by='time' for fastest/quickest, 'cost' for cheapest."
-        ),
+    "name": "find_route",
+    "description": (
+        "Find a route between two stations in the transit graph. "
+        "Use this tool for directions, how to get from A to B, route planning, "
+        "fastest route, quickest route, shortest travel-time route, or cheapest route. "
+        "Set optimise_by='time' when the user asks for fastest, quickest, shortest-time, "
+        "or general route directions without mentioning price. "
+        "Set optimise_by='cost' ONLY when the user explicitly asks for cheapest, lowest fare, "
+        "lowest cost, least expensive, price, or fare. "
+        "If the user does not mention cost, fare, price, or cheapest, default to optimise_by='time'."
+    ),
         "parameters": {
             "origin_id":      {"type": "string", "description": "Station ID e.g. MS01 or NR01"},
             "destination_id": {"type": "string", "description": "Station ID e.g. MS09 or NR05"},
             "network":        {"type": "string", "description": "metro, rail, or auto (default auto — inferred from IDs)"},
-            "optimise_by":    {"type": "string", "description": "time (fastest, default) or cost (cheapest)"},
+            "optimise_by": {
+                            "type": "string",
+                            "description": (
+                                "Route objective. Use 'time' for fastest, quickest, shortest travel-time, "
+                                "or normal route/direction questions. Use 'cost' only for cheapest, lowest fare, "
+                                "lowest cost, least expensive, price, or fare questions. Default is 'time'."
+                            ),
+                        },
         },
         "required": ["origin_id", "destination_id"],
     },
@@ -395,24 +416,28 @@ def _execute_tool(
             ]
 
         elif tool_name == "find_route":
-            origin_id      = params["origin_id"]
-            destination_id = params["destination_id"]
-            network        = params.get("network", "auto")
-            optimise_by    = params.get("optimise_by", "time")
-
-            # Detect cross-network routing (one MS, one NR)
+            origin_id = params["origin_id"].upper()
+            destination_id = params["destination_id"].upper()
+            network = params.get("network", "auto")
+            optimise_by = params.get("optimise_by", "time")
             is_cross = (
-                (origin_id.upper().startswith("MS") and destination_id.upper().startswith("NR")) or
-                (origin_id.upper().startswith("NR") and destination_id.upper().startswith("MS"))
+                (origin_id.startswith("MS") and destination_id.startswith("NR")) or
+                (origin_id.startswith("NR") and destination_id.startswith("MS"))
             )
 
             if is_cross:
-                result = query_interchange_path(origin_id, destination_id)
-            elif optimise_by == "cost":
+                network = "auto"
+
+            if optimise_by == "cost":
                 result = query_cheapest_route(
                     origin_id=origin_id,
                     destination_id=destination_id,
                     network=network,
+                )
+            elif is_cross:
+                result = query_interchange_path(
+                    origin_id=origin_id,
+                    destination_id=destination_id,
                 )
             else:
                 result = query_shortest_route(
@@ -490,6 +515,107 @@ def _normalise_result(tool_name: str, result_json: str) -> str:
     if isinstance(data, dict) and "error" in data:
         return f"Error: {data['error']}"
     return _flatten_to_text(data)
+
+def _format_route_answer(tool_name: str, result_json: str, user_message: str) -> Optional[str]:
+    """
+    Deterministically format route-related tool results.
+    This avoids small local LLMs hallucinating routes, times, stations, or login requirements.
+    """
+    try:
+        data = json.loads(result_json)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(data, dict) and data.get("error"):
+        return f"查詢時發生錯誤：{data['error']}"
+
+    if tool_name == "find_route" and isinstance(data, dict):
+        if data.get("found") is False:
+            return "找不到符合條件的有效路線。"
+
+        stations = data.get("path") or data.get("stations") or []
+        station_text = " → ".join(
+            f"{s.get('station_id', '')} {s.get('name', '')}".strip()
+            for s in stations
+            if isinstance(s, dict)
+        )
+
+        lines = []
+        if station_text:
+            lines.append(f"路線：{station_text}")
+
+        if data.get("total_time_min") is not None:
+            lines.append(f"總旅行時間：{data['total_time_min']} 分鐘")
+
+        if data.get("total_fare_usd") is not None:
+            lines.append(f"預估總費用：{data['total_fare_usd']} 美元")
+
+        legs = data.get("legs") or []
+        if legs:
+            lines.append("分段資訊：")
+            for leg in legs:
+                from_name = leg.get("from_name", leg.get("from_id", ""))
+                to_name = leg.get("to_name", leg.get("to_id", ""))
+                line = leg.get("line")
+                rel = leg.get("relationship_type", "")
+                time_min = leg.get("travel_time_min")
+                fare = leg.get("fare_usd")
+
+                detail = f"- {from_name} → {to_name}"
+                if line:
+                    detail += f"（{line}）"
+                elif rel == "INTERCHANGE_TO":
+                    detail += "（轉乘步行）"
+
+                if time_min is not None:
+                    detail += f"，{time_min} 分鐘"
+                if fare is not None:
+                    detail += f"，{fare} 美元"
+
+                lines.append(detail)
+
+        return "\n".join(lines) if lines else None
+
+    if tool_name == "find_alternative_routes":
+        if not data:
+            return "避開指定站點後，找不到可行的替代路線。"
+
+        lines = []
+        for route in data:
+            route_no = route.get("route_number", "?")
+            legs = route.get("legs", [])
+            lines.append(f"替代路線 {route_no}：")
+            if not legs:
+                lines.append("- 無路段資料")
+                continue
+
+            station_chain = []
+            total = 0
+            for i, leg in enumerate(legs):
+                if i == 0:
+                    station_chain.append(f"{leg.get('from_id', '')} {leg.get('from_name', '')}".strip())
+                station_chain.append(f"{leg.get('to_id', '')} {leg.get('to_name', '')}".strip())
+                total += leg.get("travel_time_min") or 0
+
+            lines.append(" → ".join(station_chain))
+            lines.append(f"總旅行時間：約 {total} 分鐘")
+
+        return "\n".join(lines)
+
+    if tool_name == "get_delay_ripple":
+        if not data:
+            return "沒有找到受影響的附近站點。"
+
+        lines = ["可能受影響的站點："]
+        for item in data:
+            station = f"{item.get('station_id', '')} {item.get('name', '')}".strip()
+            hops = item.get("hops_away")
+            affected = item.get("lines_affected") or []
+            affected_text = ", ".join(affected) if affected else "未標示"
+            lines.append(f"- {station}：距離 {hops} hop，涉及 {affected_text}")
+        return "\n".join(lines)
+
+    return None
 
 
 def _summarise_result(tool_name: str, result_json: str) -> str:
@@ -615,7 +741,10 @@ JSON:"""
                 "Book a ticket / make a booking → check_national_rail_availability first, then make_booking. "
                 "Cancel a booking → cancel_booking. "
                 "Policy/rules/conduct/compensation/luggage/bicycle questions → search_policy. "
-                "Route/directions/fastest/quickest/how-to-get/path questions → find_route ONLY (never get_metro_fare). "
+                "Route/directions/how-to-get/path questions → find_route ONLY (never get_metro_fare). "
+                "Fastest/quickest/shortest-time route questions → find_route with optimise_by='time'. "
+                "Cheapest/lowest-fare/lowest-cost/price route questions → find_route with optimise_by='cost'. "
+                "If no cost/fare/price words appear, use optimise_by='time'. "
                 "Metro fare/price/cost/how-much-does-it-cost questions → get_metro_fare. "
                 "Rail fare/cost/price questions → check_national_rail_availability then get_national_rail_fare. "
                 "Schedule/timetable/trains/services questions → check_national_rail_availability or check_metro_availability. "
@@ -637,17 +766,33 @@ JSON:"""
     # llama3.2:1b is unreliable for tool routing on anything beyond trivial queries.
     # Rules below cover every common query type.  Each rule only fires when the
     # correct tool is not already selected with valid required params.
+    _user_station_ids_raw = re.findall(
+        r'\b(MS\d{2}|NR\d{2})\b',
+        user_message,
+        re.IGNORECASE,
+    )
+
+    _user_station_ids = []
+    for sid in _user_station_ids_raw:
+        sid = sid.upper()
+        if sid not in _user_station_ids:
+            _user_station_ids.append(sid)
+
     _lower = _augmented_message.lower()
-    _station_ids = re.findall(r'\b(MS\d{2}|NR\d{2})\b', _augmented_message, re.IGNORECASE)
+    _station_ids_raw = re.findall(
+        r'\b(MS\d{2}|NR\d{2})\b',
+        _augmented_message,
+        re.IGNORECASE,
+    )
+
+    _station_ids = []
+    for sid in _station_ids_raw:
+        sid = sid.upper()
+        if sid not in _station_ids:
+            _station_ids.append(sid)
+
     _two_stations = len(_station_ids) >= 2
 
-    def _tool_selected(name: str, *required_params) -> bool:
-        """Return True only if tool `name` is in tool_calls with all required params set."""
-        call = next((c for c in tool_calls if c.get("name") == name), None)
-        if not call:
-            return False
-        p = call.get("params") or {}
-        return all(p.get(k) for k in required_params)
 
     def _fallback(name: str, params: dict, reason: str):
         nonlocal tool_calls
@@ -655,21 +800,120 @@ JSON:"""
         if debug:
             debug_info.append(f"**Fallback:** {reason} → {name}({params})")
 
-    # 1. Route / directions / path — also overrides wrong-tool selections
-    _route_triggers = {"fastest route", "quickest route", "shortest route", "cheapest route",
-                       "best route", "how to get", "directions from", "route from", "route to",
-                       "get from", "travel from", "way from", "path from"}
+    _route_triggers = {
+        "fastest route", "quickest route", "shortest route", "cheapest route",
+        "best route", "how to get", "directions from", "route from", "route to",
+        "get from", "travel from", "way from", "path from"
+    }
+
+    _cost_triggers = {
+        "cheap", "cheapest", "lowest cost", "lowest fare",
+        "least expensive", "fare", "price", "cost"
+    }
+
+    _time_triggers = {
+        "fastest", "quickest", "shortest time", "shortest travel time",
+        "least time", "as fast as possible"
+    }
+
+    _alternative_triggers = {
+        "alternative route", "alternative routes", "avoid", "avoiding",
+        "closed", "closure", "disruption", "disrupted", "delay", "delayed",
+        "route around", "bypass", "blocked", "not pass through"
+    }
+
     _is_route = (
         any(kw in _lower for kw in _route_triggers) or
         (_two_stations and "route" in _lower)
     )
-    if _is_route and _two_stations and not _tool_selected("find_route", "origin_id", "destination_id"):
-        _opt = "cost" if any(kw in _lower for kw in ["cheap", "cheapest", "lowest cost"]) else "time"
-        _fallback("find_route",
-                  {"origin_id": _station_ids[0].upper(), "destination_id": _station_ids[1].upper(), "optimise_by": _opt},
-                  "route query")
+    _is_alternative = any(kw in _lower for kw in _alternative_triggers)
 
-    # 2. Availability / trains / schedules between two stations
+    _delay_impact_triggers = {
+    "affected", "affected stations", "impact", "ripple", "ripple effect",
+    "within", "within 2 hops", "within two hops", "hops",
+    "may be affected", "which stations"
+    }
+
+    _is_delay_impact = (
+        any(kw in _lower for kw in ["delay", "delayed", "disruption", "disrupted"])
+        and any(kw in _lower for kw in _delay_impact_triggers)
+        and len(_station_ids) >= 1
+    )
+
+    if _is_delay_impact:
+        station_id = _station_ids[0].upper()
+
+        hop_match = re.search(r'\b(\d+)\s*hops?\b', _lower)
+        hops = int(hop_match.group(1)) if hop_match else 2
+
+        _fallback(
+            "get_delay_ripple",
+            {
+                "station_id": station_id,
+                "hops": hops,
+            },
+            "delay ripple impact query",
+        )
+
+    # 0. Alternative / disruption routing — must run before normal route fallback.
+    elif _is_alternative and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3):
+        ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
+
+        avoid_station_id = ids_for_alt[0].upper()
+        origin_id = ids_for_alt[1].upper()
+        destination_id = ids_for_alt[2].upper()
+
+        _fallback(
+            "find_alternative_routes",
+            {
+                "origin_id": origin_id,
+                "destination_id": destination_id,
+                "avoid_station_id": avoid_station_id,
+                "network": "auto",
+            },
+            "alternative/disruption route query",
+        )
+
+    # 1. Route / directions / path — also corrects wrong-tool selections.
+    elif _is_route and _two_stations:
+        _opt = "cost" if any(kw in _lower for kw in _cost_triggers) else "time"
+        existing = next((c for c in tool_calls if c.get("name") == "find_route"), None)
+
+        if existing:
+            params = existing.setdefault("params", {})
+            params["origin_id"] = params.get("origin_id") or _station_ids[0].upper()
+            params["destination_id"] = params.get("destination_id") or _station_ids[1].upper()
+
+            _o = params.get("origin_id", "").upper()
+            _d = params.get("destination_id", "").upper()
+            if (
+                (_o.startswith("MS") and _d.startswith("NR")) or
+                (_o.startswith("NR") and _d.startswith("MS"))
+            ):
+                params["network"] = "auto"
+
+            if any(kw in _lower for kw in _time_triggers):
+                params["optimise_by"] = "time"
+                if debug:
+                    debug_info.append("**Correction:** fastest/quickest route query → optimise_by='time'")
+            elif any(kw in _lower for kw in _cost_triggers):
+                params["optimise_by"] = "cost"
+                if debug:
+                    debug_info.append("**Correction:** cheapest/fare/cost route query → optimise_by='cost'")
+            else:
+                params["optimise_by"] = params.get("optimise_by", _opt)
+
+        else:
+            _fallback(
+                "find_route",
+                {
+                    "origin_id": _station_ids[0].upper(),
+                    "destination_id": _station_ids[1].upper(),
+                    "optimise_by": _opt,
+                },
+                "route query",
+            )
+
     elif not tool_calls and _two_stations:
         _avail_triggers = {"train", "trains", "service", "services", "run from", "runs from",
                            "schedule", "timetable", "available", "availability"}
@@ -684,7 +928,6 @@ JSON:"""
             _tool = "check_national_rail_availability" if o.startswith("NR") else "check_metro_availability"
             _fallback(_tool, _params, "availability query")
 
-    # 3. Personal booking history — requires login
     if current_user_email and not tool_calls:
         _personal_triggers = {"my booking", "my ticket", "my trip", "my journey", "my history",
                                "my reservation", "show booking", "view booking", "check booking",
@@ -692,13 +935,11 @@ JSON:"""
         if any(kw in _lower for kw in _personal_triggers):
             _fallback("get_user_bookings", {}, "personal booking query")
 
-    # Step 2: Execute each tool call against the real databases
     tool_results = []
     for call in tool_calls:
         tool_name = call.get("name", "")
         params    = call.get("params") or call.get("parameters", {})
 
-        # Skip calls with empty string values — LLM failed to extract params
         if any(v == "" for v in params.values()):
             if debug:
                 debug_info.append(f"**Skipped** `{tool_name}` — empty params: {params}")
@@ -723,10 +964,20 @@ JSON:"""
             "result":  result_json,
             "summary": summary,
         })
+    
+    for tr in tool_results:
+        direct_answer = _format_route_answer(tr["tool"], tr["result"], user_message)
+        if direct_answer:
+            updated_history = history + [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": direct_answer},
+            ]
+            if debug:
+                debug_info.append("**Direct formatter:** route answer generated without final LLM call")
+                return direct_answer, updated_history, "\n\n".join(debug_info)
+            return direct_answer, updated_history
 
-    # Step 3: Normalise raw tool results to plain English using the LLM, then
-    # compose the final answer.  The normalisation call replaces hand-crafted
-    # per-tool formatters: any tool a student adds works automatically.
+
     _DB_KEYWORDS = {"booking", "ticket", "schedule", "fare", "route", "seat",
                     "train", "metro", "journey", "trip", "history", "reservation"}
     if tool_results:
@@ -742,7 +993,6 @@ JSON:"""
             f"\n\nAnswer using only the data above:"
         )
     elif any(kw in user_message.lower() for kw in _DB_KEYWORDS):
-        # No tool was called but the question needs DB data — prevent hallucination.
         content = (
             f"User asks: {user_message}\n\n"
             "IMPORTANT: No data was retrieved from the TransitFlow database for this query. "
@@ -756,7 +1006,6 @@ JSON:"""
 
     answer = llm.chat(messages=final_messages, system_prompt=contextual_prompt)
 
-    # Update history
     updated_history = history + [
         {"role": "user",      "content": user_message},
         {"role": "assistant", "content": answer},
