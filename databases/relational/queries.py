@@ -763,7 +763,7 @@ def register_user(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # Check for duplicate email
-            cur.execute("SELECT 1 FROM users WHERE email = %s", (email.lower(),))
+            cur.execute("SELECT 1 FROM users WHERE email = %s", (email,))
             if cur.fetchone():
                 conn.rollback()
                 return (False, "An account with this email already exists.")
@@ -783,7 +783,7 @@ def register_user(
             cur.execute("""
                 INSERT INTO users (user_id, full_name, email, date_of_birth, secret_question)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, full_name, email.lower(), date_of_birth, secret_question))
+            """, (user_id, full_name, email, date_of_birth, secret_question))
 
             ph = PasswordHasher()
             hashed_password = ph.hash(password)
@@ -821,7 +821,7 @@ def login_user(email: str, password: str) -> Optional[dict]:
     """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, (email.lower(),))
+            cur.execute(sql, (email,))
             row = cur.fetchone()
             if not row:
                 return None
@@ -855,7 +855,7 @@ def get_user_secret_question(email: str) -> Optional[str]:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT secret_question FROM users WHERE email = %s",
-                (email.lower(),),
+                (email,),
             )
             row = cur.fetchone()
             return row[0] if row else None
@@ -874,14 +874,14 @@ def verify_secret_answer(email: str, answer: str) -> bool:
     """
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (email.lower(),))
+            cur.execute(sql, (email,))
             row = cur.fetchone()
             if not row or not row[0]:
                 return False
 
             ph = PasswordHasher()
             try:
-                ph.verify(row[0], answer.lower())
+                ph.verify(row[0], answer)
                 return True
             except VerifyMismatchError:
                 return False
@@ -900,7 +900,7 @@ def update_password(email: str, new_password: str) -> bool:
     """
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (hashed, email.lower()))
+            cur.execute(sql, (hashed, email))
             return cur.rowcount > 0
 
 
