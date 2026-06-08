@@ -812,7 +812,7 @@ def register_user(
 
             ph = PasswordHasher()
             hashed_password = ph.hash(password)
-            hashed_answer = ph.hash(secret_answer.lower())
+            hashed_answer = ph.hash(secret_answer)
 
             cur.execute("""
                 INSERT INTO user_passwords (user_id, password_hash, secret_answer_hash)
@@ -906,10 +906,6 @@ def verify_secret_answer(email: str, answer: str) -> bool:
 
             ph = PasswordHasher()
             try:
-                # Why call .lower() on the answer during registration but compare the raw hash here?
-                # The answer was lowered and hashed at registration time (seed_postgres.py / register_user),
-                # so verify() performs a constant-time comparison against the stored lowercase hash.
-                # This achieves case-insensitive matching without storing plaintext.
                 ph.verify(row[0], answer)
                 return True
             except VerifyMismatchError:
