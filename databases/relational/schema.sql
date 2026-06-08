@@ -28,6 +28,25 @@
 --    docker-compose down -v && docker-compose up -d
 -- ============================================================
 
+-- ============================================================
+-- DESIGN DECISIONS
+-- ============================================================
+--
+-- PK Design: All primary keys use VARCHAR(50) rather than SERIAL/UUID.
+-- Reason: The mock data ships with human-readable string IDs (e.g. "RU01",
+-- "NR_SCH03"). VARCHAR PKs keep seed data deterministic, make debugging
+-- easier, and avoid the need for a sequence reset after re-seeding.
+-- Trade-off: slightly larger index footprint vs. readability and
+-- portability across environments without auto-increment conflicts.
+--
+-- Delete Strategy: SOFT DELETE for users (is_active BOOLEAN flag) so that
+-- historical bookings, payments, and feedback remain intact even when a
+-- user deactivates their account. HARD DELETE (ON DELETE CASCADE) is used
+-- for structural child rows (schedule stops, coaches, seats) that have no
+-- meaning without their parent. Transactional tables (bookings, payments,
+-- feedback) use ON DELETE RESTRICT to prevent accidental data loss.
+-- ============================================================
+
 -- Users Domain
 CREATE TABLE IF NOT EXISTS users (
     user_id VARCHAR(50) PRIMARY KEY,
@@ -62,8 +81,8 @@ CREATE TABLE IF NOT EXISTS metro_schedules (
     schedule_id VARCHAR(50) PRIMARY KEY,
     line VARCHAR(50) NOT NULL,
     direction VARCHAR(50) NOT NULL,
-    origin_station_id VARCHAR(50) REFERENCES metro_stations(station_id),
-    destination_station_id VARCHAR(50) REFERENCES metro_stations(station_id),
+    origin_station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
     first_train_time TIME,
     last_train_time TIME,
     base_fare_usd NUMERIC(10, 2) NOT NULL,
@@ -91,8 +110,8 @@ CREATE TABLE IF NOT EXISTS national_rail_schedules (
     line VARCHAR(50) NOT NULL,
     service_type VARCHAR(50) NOT NULL,
     direction VARCHAR(50) NOT NULL,
-    origin_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id),
-    destination_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id),
+    origin_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
     first_train_time TIME,
     last_train_time TIME,
     frequency_min INT NOT NULL
@@ -145,17 +164,17 @@ CREATE TABLE IF NOT EXISTS national_rail_seats (
 -- Transactions
 CREATE TABLE IF NOT EXISTS national_rail_bookings (
     booking_id VARCHAR(50) PRIMARY KEY,
-    user_id VARCHAR(50) REFERENCES users(user_id),
-    schedule_id VARCHAR(50) REFERENCES national_rail_schedules(schedule_id),
-    origin_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id),
-    destination_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id),
+    user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE RESTRICT,
+    schedule_id VARCHAR(50) REFERENCES national_rail_schedules(schedule_id) ON DELETE RESTRICT,
+    origin_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
     travel_date DATE NOT NULL,
     departure_time TIME NOT NULL,
     ticket_type VARCHAR(50) NOT NULL,
     fare_class VARCHAR(50) NOT NULL,
     coach_id VARCHAR(50),
     seat_id VARCHAR(50),
-    FOREIGN KEY (coach_id, seat_id) REFERENCES national_rail_seats(coach_id, seat_id),
+    FOREIGN KEY (coach_id, seat_id) REFERENCES national_rail_seats(coach_id, seat_id) ON DELETE SET NULL,
     CONSTRAINT national_rail_bookings_seat_pair_chk CHECK (
         (coach_id IS NULL AND seat_id IS NULL) OR
         (coach_id IS NOT NULL AND seat_id IS NOT NULL)
@@ -169,10 +188,10 @@ CREATE TABLE IF NOT EXISTS national_rail_bookings (
 
 CREATE TABLE IF NOT EXISTS metro_travel_history (
     trip_id VARCHAR(50) PRIMARY KEY,
-    user_id VARCHAR(50) REFERENCES users(user_id),
-    schedule_id VARCHAR(50) REFERENCES metro_schedules(schedule_id),
-    origin_station_id VARCHAR(50) REFERENCES metro_stations(station_id),
-    destination_station_id VARCHAR(50) REFERENCES metro_stations(station_id),
+    user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE RESTRICT,
+    schedule_id VARCHAR(50) REFERENCES metro_schedules(schedule_id) ON DELETE RESTRICT,
+    origin_station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
     travel_date DATE NOT NULL,
     ticket_type VARCHAR(50) NOT NULL,
     day_pass_ref VARCHAR(50),
@@ -206,7 +225,7 @@ CREATE TABLE IF NOT EXISTS national_rail_payments (
 CREATE TABLE IF NOT EXISTS metro_feedbacks (
     feedback_id VARCHAR(50) PRIMARY KEY,
     trip_id VARCHAR(50) NOT NULL REFERENCES metro_travel_history(trip_id) ON DELETE CASCADE,
-    user_id VARCHAR(50) REFERENCES users(user_id),
+    user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE SET NULL,
     rating INT CHECK (rating BETWEEN 1 AND 5),
     comment TEXT,
     submitted_at TIMESTAMPTZ DEFAULT NOW()
@@ -215,7 +234,7 @@ CREATE TABLE IF NOT EXISTS metro_feedbacks (
 CREATE TABLE IF NOT EXISTS national_rail_feedbacks (
     feedback_id VARCHAR(50) PRIMARY KEY,
     booking_id VARCHAR(50) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE CASCADE,
-    user_id VARCHAR(50) REFERENCES users(user_id),
+    user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE SET NULL,
     rating INT CHECK (rating BETWEEN 1 AND 5),
     comment TEXT,
     submitted_at TIMESTAMPTZ DEFAULT NOW()

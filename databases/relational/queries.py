@@ -83,6 +83,12 @@ def query_national_rail_availability(
         destination_id:  e.g. "NR05"
         travel_date:     e.g. "2025-06-01" — used to count bookings; omit for general info
     """
+    # Why two separate JOINs on schedule_stops (orig_stop & dest_stop)?
+    # A single schedule serves many stations; we need to confirm BOTH the
+    # origin and destination appear on the same schedule AND that the origin
+    # comes before the destination (stop_order comparison). Filtering
+    # is_passed_through = FALSE ensures express trains that skip a station
+    # are not returned as valid options for that station.
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             params: list = [origin_id, destination_id]
@@ -286,6 +292,11 @@ def query_available_seats(
     Returns:
         List of dicts: {seat_id, coach, row, column}
     """
+    # Why NOT EXISTS instead of a LEFT JOIN + NULL check?
+    # NOT EXISTS short-circuits as soon as it finds ONE matching booking,
+    # making it faster for schedules with many bookings. It also avoids
+    # inflating the result set the way a LEFT JOIN would when a seat has
+    # multiple cancelled bookings on different dates.
     sql = """
         SELECT st.seat_id,
                c.coach_name AS coach,
@@ -458,6 +469,11 @@ def execute_booking(
         (True, booking_dict)   on success
         (False, error_message) on failure
     """
+    # Why disable autocommit and use a manual transaction?
+    # Booking creation involves TWO inserts (booking + payment) that must
+    # succeed or fail atomically. If the payment insert fails after the
+    # booking was already committed, we'd have an orphaned booking with no
+    # payment record — violating data integrity.
     conn = _connect()
     conn.autocommit = False
     try:
@@ -661,6 +677,11 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             hours_before = (travel_dt - now).total_seconds() / 3600
 
             # 3. Determine refund based on service type and time window
+            # Why separate refund policies per service_type?
+            # Express services (RF002) have stricter cancellation windows
+            # because express trains have limited capacity and higher demand.
+            # Normal services (RF001) offer more gradual refund tiers to
+            # encourage early cancellations and allow re-selling the seat.
             service_type = booking["service_type"]
             amount = float(booking["amount_usd"])
 
@@ -881,6 +902,10 @@ def verify_secret_answer(email: str, answer: str) -> bool:
 
             ph = PasswordHasher()
             try:
+                # Why call .lower() on the answer during registration but compare the raw hash here?
+                # The answer was lowered and hashed at registration time (seed_postgres.py / register_user),
+                # so verify() performs a constant-time comparison against the stored lowercase hash.
+                # This achieves case-insensitive matching without storing plaintext.
                 ph.verify(row[0], answer)
                 return True
             except VerifyMismatchError:
