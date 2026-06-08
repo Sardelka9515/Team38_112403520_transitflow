@@ -32,24 +32,46 @@
 -- DESIGN DECISIONS
 -- ============================================================
 --
--- PK Design: All primary keys use VARCHAR(50) rather than SERIAL/UUID.
--- Reason: The mock data ships with human-readable string IDs (e.g. "RU01",
--- "NR_SCH03"). VARCHAR PKs keep seed data deterministic, make debugging
--- easier, and avoid the need for a sequence reset after re-seeding.
--- Trade-off: slightly larger index footprint vs. readability and
--- portability across environments without auto-increment conflicts.
+-- PK Design (Surrogate Key Pattern):
+--   We use surrogate PKs (UUID or SERIAL) alongside preserved business IDs.
+--   The business ID (e.g. "RU01", "MS01") is kept as a UNIQUE NOT NULL
+--   column so that existing application code, the agent, and seed scripts
+--   continue to work unchanged.
+--
+--   UUID is chosen for tables whose IDs may be exposed externally
+--   (users, bookings, payments) — UUIDs are globally unique and
+--   non-sequential, preventing enumeration attacks (guessing IDs).
+--
+--   SERIAL is chosen for internal structural tables (stations, schedules,
+--   seat layouts, coaches, feedbacks) where IDs stay within the database
+--   and auto-increment is sufficient.  SERIALs are smaller (4-byte INT)
+--   than UUIDs, making joins and indexes on these high-join tables faster.
+--
+--   FK columns continue to reference the UNIQUE business-ID column rather
+--   than the surrogate PK.  PostgreSQL permits FKs on any UNIQUE NOT NULL
+--   column — this keeps all queries and seed logic stable while the schema
+--   gains proper surrogate keys.
 --
 -- Delete Strategy: SOFT DELETE for users (is_active BOOLEAN flag) so that
--- historical bookings, payments, and feedback remain intact even when a
--- user deactivates their account. HARD DELETE (ON DELETE CASCADE) is used
--- for structural child rows (schedule stops, coaches, seats) that have no
--- meaning without their parent. Transactional tables (bookings, payments,
--- feedback) use ON DELETE RESTRICT to prevent accidental data loss.
+--   historical bookings, payments, and feedback remain intact even when a
+--   user deactivates their account. HARD DELETE (ON DELETE CASCADE) is used
+--   for structural child rows (schedule stops, coaches, seats) that have no
+--   meaning without their parent. Transactional tables (bookings, payments,
+--   feedback) use ON DELETE RESTRICT to prevent accidental data loss.
 -- ============================================================
 
+-- Required for gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ============================================================
 -- Users Domain
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS users (
-    user_id VARCHAR(50) PRIMARY KEY,
+    -- UUID PK: user IDs may appear in booking references or external APIs;
+    -- UUID prevents sequential enumeration of user accounts.
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id VARCHAR(50) UNIQUE NOT NULL,   -- business ID e.g. "RU01"
     full_name VARCHAR(100) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     phone VARCHAR(50),
@@ -60,25 +82,41 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS user_passwords (
+    -- 1-to-1 with users; uses the business user_id as PK/FK so that the
+    -- join is a simple equality on a UNIQUE indexed column.
     user_id VARCHAR(50) PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
     password_hash VARCHAR(255) NOT NULL,
     secret_answer_hash VARCHAR(255)
 );
 
--- Stations Base
+-- ============================================================
+-- Stations
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS metro_stations (
-    station_id VARCHAR(50) PRIMARY KEY,
+    -- SERIAL PK: stations are a small, stable, internal reference set.
+    -- SERIAL (4-byte integer) is lighter than UUID for a table that is
+    -- joined on every schedule and booking query.
+    id SERIAL PRIMARY KEY,
+    station_id VARCHAR(50) UNIQUE NOT NULL,  -- business ID e.g. "MS01"
     name VARCHAR(100) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS national_rail_stations (
-    station_id VARCHAR(50) PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
+    station_id VARCHAR(50) UNIQUE NOT NULL,  -- business ID e.g. "NR01"
     name VARCHAR(100) NOT NULL
 );
 
+-- ============================================================
 -- Metro Schedules
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS metro_schedules (
-    schedule_id VARCHAR(50) PRIMARY KEY,
+    -- SERIAL PK: schedules are managed internally and never exposed
+    -- as opaque tokens; SERIAL keeps the index compact.
+    id SERIAL PRIMARY KEY,
+    schedule_id VARCHAR(50) UNIQUE NOT NULL,  -- e.g. "MS_SCH01"
     line VARCHAR(50) NOT NULL,
     direction VARCHAR(50) NOT NULL,
     origin_station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
@@ -86,13 +124,13 @@ CREATE TABLE IF NOT EXISTS metro_schedules (
     first_train_time TIME,
     last_train_time TIME,
     base_fare_usd NUMERIC(10, 2) NOT NULL,
-    per_stop_rate_usd NUMERIC(10, 2) NOT NULL,
+    per_stop_rate_usdNUMERIC(10, 2) NOT NULL,
     frequency_min INT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS metro_schedule_stops (
     schedule_id VARCHAR(50) REFERENCES metro_schedules(schedule_id) ON DELETE CASCADE,
-    station_id VARCHAR(50) REFERENCES metro_stations(station_id),
+    station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
     stop_order INT NOT NULL,
     travel_time_from_origin_min INT NOT NULL,
     PRIMARY KEY (schedule_id, station_id)
@@ -104,9 +142,13 @@ CREATE TABLE IF NOT EXISTS metro_schedule_days (
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
+-- ============================================================
 -- National Rail Schedules
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS national_rail_schedules (
-    schedule_id VARCHAR(50) PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
+    schedule_id VARCHAR(50) UNIQUE NOT NULL,  -- e.g. "NR_SCH01"
     line VARCHAR(50) NOT NULL,
     service_type VARCHAR(50) NOT NULL,
     direction VARCHAR(50) NOT NULL,
@@ -119,7 +161,7 @@ CREATE TABLE IF NOT EXISTS national_rail_schedules (
 
 CREATE TABLE IF NOT EXISTS national_rail_schedule_stops (
     schedule_id VARCHAR(50) REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE,
-    station_id VARCHAR(50) REFERENCES national_rail_stations(station_id),
+    station_id VARCHAR(50) REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
     stop_order INT NOT NULL,
     travel_time_from_origin_min INT NOT NULL,
     is_passed_through BOOLEAN DEFAULT FALSE,
@@ -140,20 +182,28 @@ CREATE TABLE IF NOT EXISTS national_rail_schedule_days (
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
+-- ============================================================
 -- Seat Layouts
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS national_rail_seat_layouts (
-    layout_id VARCHAR(50) PRIMARY KEY,
+    -- SERIAL PK: purely internal seat-map data; SERIAL is sufficient.
+    id SERIAL PRIMARY KEY,
+    layout_id VARCHAR(50) UNIQUE NOT NULL,  -- e.g. "NR_LAYOUT01"
     schedule_id VARCHAR(50) REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS national_rail_coaches (
-    coach_id VARCHAR(50) PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
+    coach_id VARCHAR(50) UNIQUE NOT NULL,  -- e.g. "NR_LAYOUT01_A"
     layout_id VARCHAR(50) REFERENCES national_rail_seat_layouts(layout_id) ON DELETE CASCADE,
     coach_name VARCHAR(50) NOT NULL,
     fare_class VARCHAR(50) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS national_rail_seats (
+    -- Composite PK on business keys: a seat is uniquely identified by its
+    -- coach and seat label; no surrogate key needed for this leaf table.
     seat_id VARCHAR(50) NOT NULL,
     coach_id VARCHAR(50) REFERENCES national_rail_coaches(coach_id) ON DELETE CASCADE,
     row INT NOT NULL,
@@ -161,9 +211,15 @@ CREATE TABLE IF NOT EXISTS national_rail_seats (
     PRIMARY KEY (coach_id, seat_id)
 );
 
+-- ============================================================
 -- Transactions
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS national_rail_bookings (
-    booking_id VARCHAR(50) PRIMARY KEY,
+    -- UUID PK: booking references are shown to passengers on tickets and
+    -- in confirmation emails; UUID prevents sequential ID guessing.
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id VARCHAR(50) UNIQUE NOT NULL,  -- e.g. "BK001" or "BK-XXXXXX"
     user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE RESTRICT,
     schedule_id VARCHAR(50) REFERENCES national_rail_schedules(schedule_id) ON DELETE RESTRICT,
     origin_station_id VARCHAR(50) REFERENCES national_rail_stations(station_id) ON DELETE RESTRICT,
@@ -187,7 +243,9 @@ CREATE TABLE IF NOT EXISTS national_rail_bookings (
 );
 
 CREATE TABLE IF NOT EXISTS metro_travel_history (
-    trip_id VARCHAR(50) PRIMARY KEY,
+    -- UUID PK: trip records may be referenced in receipts or exports.
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trip_id VARCHAR(50) UNIQUE NOT NULL,  -- e.g. "MT001"
     user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE RESTRICT,
     schedule_id VARCHAR(50) REFERENCES metro_schedules(schedule_id) ON DELETE RESTRICT,
     origin_station_id VARCHAR(50) REFERENCES metro_stations(station_id) ON DELETE RESTRICT,
@@ -202,9 +260,15 @@ CREATE TABLE IF NOT EXISTS metro_travel_history (
     travelled_at TIMESTAMPTZ
 );
 
+-- ============================================================
 -- Payments
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS metro_payments (
-    payment_id VARCHAR(50) PRIMARY KEY,
+    -- UUID PK: payment IDs are referenced in refund records and
+    -- external payment gateway callbacks; UUID prevents enumeration.
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payment_id VARCHAR(50) UNIQUE NOT NULL,
     trip_id VARCHAR(50) NOT NULL REFERENCES metro_travel_history(trip_id) ON DELETE CASCADE,
     amount_usd NUMERIC(10, 2) NOT NULL,
     method VARCHAR(50) NOT NULL,
@@ -213,7 +277,8 @@ CREATE TABLE IF NOT EXISTS metro_payments (
 );
 
 CREATE TABLE IF NOT EXISTS national_rail_payments (
-    payment_id VARCHAR(50) PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payment_id VARCHAR(50) UNIQUE NOT NULL,
     booking_id VARCHAR(50) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE CASCADE,
     amount_usd NUMERIC(10, 2) NOT NULL,
     method VARCHAR(50) NOT NULL,
@@ -221,9 +286,15 @@ CREATE TABLE IF NOT EXISTS national_rail_payments (
     paid_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ============================================================
 -- Feedbacks
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS metro_feedbacks (
-    feedback_id VARCHAR(50) PRIMARY KEY,
+    -- SERIAL PK: feedback records are internal analytics data only;
+    -- they are never exposed to passengers as tokens, so SERIAL suffices.
+    id SERIAL PRIMARY KEY,
+    feedback_id VARCHAR(50) UNIQUE NOT NULL,
     trip_id VARCHAR(50) NOT NULL REFERENCES metro_travel_history(trip_id) ON DELETE CASCADE,
     user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE SET NULL,
     rating INT CHECK (rating BETWEEN 1 AND 5),
@@ -232,7 +303,8 @@ CREATE TABLE IF NOT EXISTS metro_feedbacks (
 );
 
 CREATE TABLE IF NOT EXISTS national_rail_feedbacks (
-    feedback_id VARCHAR(50) PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
+    feedback_id VARCHAR(50) UNIQUE NOT NULL,
     booking_id VARCHAR(50) NOT NULL REFERENCES national_rail_bookings(booking_id) ON DELETE CASCADE,
     user_id VARCHAR(50) REFERENCES users(user_id) ON DELETE SET NULL,
     rating INT CHECK (rating BETWEEN 1 AND 5),
