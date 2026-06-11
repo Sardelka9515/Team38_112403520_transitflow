@@ -1,41 +1,45 @@
 """
-TransitFlow — Neo4j 圖資料庫查詢層
-=================================
+TransitFlow — Neo4j Graph Database Query Layer
+=============================================
 
-本模組提供 TransitFlow AI 助理可呼叫的 Neo4j graph query functions。
-這些函數主要處理路網拓樸問題，例如路線搜尋、轉乘、替代路線、
-延誤影響範圍與直接相鄰站點。
+This module provides Neo4j graph query functions that can be called by the TransitFlow AI assistant.
+These functions mainly handle network topology problems, such as route search, transfers,
+alternative routes, delay impact areas, and directly adjacent stations.
 
-工具選擇原則：
+Tool selection principles:
 - query_shortest_route:
-    使用者問最快路線、最短時間、quickest route、fastest route,
-    或一般「如何從 A 到 B」且沒有指定票價、避開站點或延誤影響時使用。
+    Use this when the user asks for the fastest route, shortest travel time, quickest route,
+    fastest route, or generally asks “how to get from A to B” without specifying fare,
+    avoiding stations, or delay impact.
 
 - query_cheapest_route:
-    使用者問最便宜路線、最低票價、lowest fare、cheapest way,
-    或以費用最小化為主要目標時使用。
+    Use this when the user asks for the cheapest route, lowest fare, lowest fare,
+    cheapest way, or when cost minimization is the main objective.
 
 - query_alternative_routes:
-    使用者問替代路線、避開某站、某站關閉、某站延誤、disruption、
-    closure、avoid station 或 route around problem 時使用。
+    Use this when the user asks for alternative routes, avoiding a station, station closure,
+    station delay, disruption, closure, avoid station, or route around a problem.
 
 - query_interchange_path:
-    使用者明確詢問 metro 與 national rail 之間的轉乘、interchange、
-    transfer,或需要解釋在哪裡從一種交通網路換到另一種時使用。
+    Use this when the user explicitly asks about transfers between metro and national rail,
+    interchange, transfer, or needs an explanation of where to switch from one transport
+    network to another.
 
 - query_delay_ripple:
-    使用者問某站延誤或中斷會影響哪些附近站點、影響範圍、
-    ripple effect、affected stations 或 N hops 內站點時使用。
-    這不是路線規劃工具，而是路網影響分析工具。
+    Use this when the user asks which nearby stations would be affected by a delay or
+    disruption at a certain station, the scope of impact, ripple effect, affected stations,
+    or stations within N hops.
+    This is not a route planning tool, but a network impact analysis tool.
 
 - query_station_connections:
-    使用者問某站有哪些直接相鄰站、direct connections、adjacent stations、
-    nearby stations 或該站有哪些直接轉乘/連線時使用。
-    這只查一跳連線，不計算完整路線。
+    Use this when the user asks which directly adjacent stations a station has,
+    direct connections, adjacent stations, nearby stations, or what direct transfers/connections
+    are available at that station.
+    This only queries one-hop connections and does not calculate a complete route.
 
-站點 ID 規則：
-- Metro station ID 以 "MS" 開頭，例如 "MS01"。
-- National rail station ID 以 "NR" 開頭，例如 "NR01"。
+Station ID rules:
+- Metro station IDs start with "MS", for example "MS01".
+- National rail station IDs start with "NR", for example "NR01".
 """
 
 from __future__ import annotations
@@ -53,23 +57,26 @@ def _driver():
 
 def example_count_nodes() :
     """
-    範例函數：計算目前 Neo4j graph 中的所有節點數量。
+    Example function: calculates the total number of nodes in the current Neo4j graph.
 
-    注意：
-        這個函數主要用於開發、測試與確認 Neo4j 是否成功連線。
-        它不是 TransitFlow AI agent 的正式查詢工具。
-        使用者若詢問路線、轉乘、票價、延誤影響或站點連線，不應呼叫此函數。
+    Note:
+        This function is mainly used for development, testing, and verifying whether
+        the Neo4j connection is successful.
+        It is not an official query tool for the TransitFlow AI agent.
+        If the user asks about routes, transfers, fares, delay impacts, or station connections,
+        this function should not be called.
 
-    適合使用：
-        - 開發者想快速確認 Neo4j 是否有資料。
-        - 測試資料是否已經成功 seed 進 graph database。
+    Suitable for:
+        - Developers who want to quickly check whether Neo4j contains data.
+        - Testing whether data has been successfully seeded into the graph database.
 
-    不適合使用：
-        - 不適合回答任何路線規劃問題。
-        - 不適合回答最快路線、最便宜路線、替代路線、轉乘或延誤影響問題。
+    Not suitable for:
+        - Not suitable for answering any route planning questions.
+        - Not suitable for answering questions about the fastest route, cheapest route,
+        alternative routes, transfers, or delay impacts.
 
-    回傳：
-        int,目前 graph 中所有 nodes 的總數。
+    Returns:
+        int, the total number of all nodes in the current graph.
     """
     with _driver() as driver:
         with driver.session() as session:
@@ -78,37 +85,43 @@ def example_count_nodes() :
 
 def _relationship_pattern(network: str, origin_id: str = "", destination_id: str = "") :
     """
-    根據指定 network 與起訖站 ID,回傳安全的 Cypher relationship type pattern。
+    Returns a safe Cypher relationship type pattern based on the specified network
+    and the origin/destination station IDs.
 
-    注意：
-        這是內部輔助函數，不是給 AI agent 或使用者直接呼叫的工具。
-        因為 Cypher relationship type 無法用參數化方式傳入，所以本函數只回傳
-        程式內固定允許的 relationship types,避免把任意使用者輸入直接插入 Cypher。
+    Note:
+        This is an internal helper function, not a tool intended to be called directly
+        by the AI agent or the user.
+        Since Cypher relationship types cannot be passed in as parameters, this function
+        only returns relationship types that are explicitly allowed in the program,
+        preventing arbitrary user input from being inserted directly into Cypher.
 
-    network 規則：
+    Network rules:
         - "metro":
-            只允許 METRO_LINK,適合 metro 站點之間的路線。
+            Only allows METRO_LINK, suitable for routes between metro stations.
         - "rail":
-            只允許 RAIL_LINK,適合 national rail 站點之間的路線。
+            Only allows RAIL_LINK, suitable for routes between national rail stations.
         - "auto":
-            若 origin_id 和 destination_id 都以 "MS" 開頭，只使用 METRO_LINK。
-            若 origin_id 和 destination_id 都以 "NR" 開頭，只使用 RAIL_LINK。
-            若起訖站分屬不同網路，允許 METRO_LINK、RAIL_LINK 與 INTERCHANGE_TO,
-            讓路線可以跨 metro 與 national rail 轉乘。
-        - 其他值：
-            為了保持可用性，預設允許 METRO_LINK、RAIL_LINK 與 INTERCHANGE_TO。
+            If both origin_id and destination_id start with "MS", only use METRO_LINK.
+            If both origin_id and destination_id start with "NR", only use RAIL_LINK.
+            If the origin and destination belong to different networks, allow METRO_LINK,
+            RAIL_LINK, and INTERCHANGE_TO so that routes can transfer across metro and
+            national rail.
+        - Other values:
+            To maintain usability, METRO_LINK, RAIL_LINK, and INTERCHANGE_TO are allowed
+            by default.
 
-    參數：
+    Parameters:
         network:
-            搜尋網路範圍，建議使用 "metro"、"rail" 或 "auto"。
+            The search network scope. Recommended values are "metro", "rail", or "auto".
         origin_id:
-            起點站 ID,例如 "MS01" 或 "NR01"。
+            The origin station ID, such as "MS01" or "NR01".
         destination_id:
-            終點站 ID,例如 "MS09" 或 "NR05"。
+            The destination station ID, such as "MS09" or "NR05".
 
-    回傳：
-        str,可安全插入 Cypher relationship pattern 的 relationship type 字串。
-        例如 "METRO_LINK"、"RAIL_LINK" 或 "METRO_LINK|RAIL_LINK|INTERCHANGE_TO"。
+    Returns:
+        str, a relationship type string that can be safely inserted into a Cypher
+        relationship pattern.
+        For example, "METRO_LINK", "RAIL_LINK", or "METRO_LINK|RAIL_LINK|INTERCHANGE_TO".
     """
     network = (network or "auto").lower()
 
@@ -127,55 +140,80 @@ def _relationship_pattern(network: str, origin_id: str = "", destination_id: str
 
     return "METRO_LINK|RAIL_LINK|INTERCHANGE_TO"
 
+def _alternative_relationship_pattern(network="auto"):
+    """
+    Relationship pattern for alternative-route search.
+
+    Unlike normal shortest-route search, an alternative route may need to leave the
+    original network and come back through an interchange. For example, when a
+    National Rail station is disrupted, the best valid detour may use Metro links.
+
+    Therefore network="auto" intentionally allows all transit relationship types.
+    Explicit network="metro" or network="rail" remains restricted for cases where
+    a caller truly wants a single-network search.
+    """
+    network = (network or "auto").lower()
+
+    if network == "metro":
+        return "METRO_LINK"
+
+    if network == "rail":
+        return "RAIL_LINK"
+
+    return "METRO_LINK|RAIL_LINK|INTERCHANGE_TO"
 
 def query_station_connections(station_id: str) :
     """
-    查詢某一站的一跳直接連線站點。
+    Queries the one-hop direct connection stations of a given station.
 
-    用途：
-        回傳指定站點直接相鄰的 metro、national rail 或 interchange 連線。
-        本函數只查詢「直接連到的站」，不會計算從起點到終點的完整路線，
-        也不會做最快路線、最便宜路線或替代路線搜尋。
+    Purpose:
+        Returns the metro, national rail, or interchange connections that are directly adjacent
+        to the specified station.
+        This function only queries stations that are directly connected. It does not calculate
+        a complete route from an origin to a destination, nor does it search for the fastest route,
+        cheapest route, or alternative routes.
 
-    適合使用：
-        - 使用者詢問某站直接連到哪些站。
-        - 使用者詢問某站的 adjacent stations、nearby stations 或 direct connections。
-        - 使用者詢問某站有哪些可用 line、直接轉乘或一跳鄰居。
-        - 使用者想了解某一站在 graph network 中的直接連線關係。
-        - 使用者問「MS01 附近直接有哪些站」或「NR03 直接連到誰」。
+    Suitable for:
+        - When the user asks which stations are directly connected to a certain station.
+        - When the user asks about adjacent stations, nearby stations, or direct connections.
+        - When the user asks which available lines, direct transfers, or one-hop neighbors a station has.
+        - When the user wants to understand the direct connection relationships of a station
+        in the graph network.
+        - When the user asks “Which stations are directly near MS01?” or “Who is NR03 directly connected to?”
 
-    不適合使用：
-        - 若使用者詢問從 A 到 B 的最快路線，請改用 query_shortest_route。
-        - 若使用者詢問從 A 到 B 的最便宜路線，請改用 query_cheapest_route。
-        - 若使用者詢問避開某站、封站、延誤繞路或替代路線，
-          請改用 query_alternative_routes。
-        - 若使用者詢問 metro 與 national rail 之間的完整轉乘路徑，
-          請改用 query_interchange_path。
-        - 若使用者詢問某站延誤會影響哪些站，
-          請改用 query_delay_ripple。
+    Not suitable for:
+        - If the user asks for the fastest route from A to B, use query_shortest_route instead.
+        - If the user asks for the cheapest route from A to B, use query_cheapest_route instead.
+        - If the user asks about avoiding a station, station closure, delay detours,
+        or alternative routes, use query_alternative_routes instead.
+        - If the user asks for a complete transfer path between metro and national rail,
+        use query_interchange_path instead.
+        - If the user asks which stations would be affected by a delay at a certain station,
+        use query_delay_ripple instead.
 
-    參數：
+    Parameters:
         station_id:
-            要查詢直接連線的站點 ID。
-            Metro station ID 以 "MS" 開頭，例如 "MS01"。
-            National rail station ID 以 "NR" 開頭，例如 "NR01"。
+            The station ID whose direct connections should be queried.
+            Metro station IDs start with "MS", for example "MS01".
+            National rail station IDs start with "NR", for example "NR01".
 
-    回傳：
-        list[dict]，每個 dict 代表一條從該站出發的一跳直接連線，包含：
-        - from_id: 查詢站點 ID。
-        - from_name: 查詢站點名稱。
-        - relationship_type: 連線類型，例如 METRO_LINK、RAIL_LINK 或 INTERCHANGE_TO。
-        - line: metro 或 rail line 名稱；若是 INTERCHANGE_TO 可能為 None。
-        - travel_time_min: 此直接連線的預估時間，單位為分鐘。
-        - fare_usd: 此直接連線的估計費用；若是轉乘步行通常為 0。
-        - to_id: 相鄰站點 ID。
-        - to_name: 相鄰站點名稱。
-        - to_labels: 相鄰站點的 Neo4j labels。
+    Returns:
+        list[dict], where each dict represents a one-hop direct connection from the station,
+        including:
+        - from_id: The queried station ID.
+        - from_name: The queried station name.
+        - relationship_type: The connection type, such as METRO_LINK, RAIL_LINK, or INTERCHANGE_TO.
+        - line: The metro or rail line name; may be None for INTERCHANGE_TO.
+        - travel_time_min: The estimated time of this direct connection, in minutes.
+        - fare_usd: The estimated cost of this direct connection; usually 0 for walking transfers.
+        - to_id: The adjacent station ID.
+        - to_name: The adjacent station name.
+        - to_labels: The Neo4j labels of the adjacent station.
 
-    範例使用情境：
-        使用者問:「MS01 直接連到哪些站?」
-        使用者問:「Central Square 附近有哪些直接相鄰站?」
-        使用者問:「NR03 有哪些 direct connections?」
+    Example use cases:
+        User asks: “Which stations is MS01 directly connected to?”
+        User asks: “Which directly adjacent stations are near Central Square?”
+        User asks: “What direct connections does NR03 have?”
     """
     cypher = """
     MATCH (s {station_id: $station_id})-[r]->(n)
@@ -204,51 +242,60 @@ def query_shortest_route(
     network: str = "auto",
 ) :
     """
-    用途：
-        查詢兩個站點之間「總旅行時間最短」的路線。
+    Purpose:
+        Queries the route with the shortest total travel time between two stations.
 
-    適合使用：
-        - 使用者詢問最快路線、最短時間路線、quickest route、fastest route。
-        - 使用者問「如何從 A 到 B」且沒有特別指定要最便宜、避開某站或查看延誤影響。
-        - 可處理 metro 內部路線、national rail 內部路線，也可在 network="auto"
-          時處理跨 metro / national rail 的路線。
+    Suitable for:
+        - When the user asks for the quickest route, shortest-time route, quickest route,
+        or fastest route.
+        - When the user asks “how to get from A to B” without specifically requesting
+        the cheapest route, avoiding a station, or checking delay impact.
+        - Can handle routes within the metro network, within the national rail network,
+        and cross-network metro / national rail routes when network="auto".
 
-    不適合使用：
-        - 若使用者詢問最便宜、最低票價、lowest fare、cheapest route,
-          請改用 query_cheapest_route。
-        - 若使用者詢問避開某站、封站、延誤繞路、alternative route,
-          請改用 query_alternative_routes。
-        - 若使用者主要想知道某站延誤會影響哪些站，
-          請改用 query_delay_ripple。
-        - 若使用者只問某站直接連到哪些站，
-          請改用 query_station_connections。
-        - 若使用者明確強調轉乘點或 interchange 說明，
-          請優先考慮 query_interchange_path。
+    Not suitable for:
+        - If the user asks for the cheapest route, lowest fare, lowest fare, or cheapest route,
+        use query_cheapest_route instead.
+        - If the user asks about avoiding a station, station closure, delay detours,
+        or alternative routes, use query_alternative_routes instead.
+        - If the user mainly wants to know which stations would be affected by a delay
+        at a certain station, use query_delay_ripple instead.
+        - If the user only asks which stations are directly connected to a certain station,
+        use query_station_connections instead.
+        - If the user explicitly emphasizes transfer points or interchange explanations,
+        prioritize query_interchange_path.
 
-    參數：
+    Parameters:
         origin_id:
-            起點站 ID。Metro station 使用 "MS" 開頭，例如 "MS01";
-            National rail station 使用 "NR" 開頭，例如 "NR01"。
+            The origin station ID. Metro station IDs start with "MS", for example "MS01";
+            national rail station IDs start with "NR", for example "NR01".
         destination_id:
-            終點站 ID。格式同 origin_id,例如 "MS09" 或 "NR05"。
+            The destination station ID. Same format as origin_id, such as "MS09" or "NR05".
         network:
-            搜尋範圍。
-            - "metro"：只搜尋 metro network。
-            - "rail"：只搜尋 national rail network。
-            - "auto"：根據站點 ID 自動推斷；若起訖站分屬不同網路，允許使用 INTERCHANGE_TO 轉乘。
+            The search scope.
+            - "metro": only searches the metro network.
+            - "rail": only searches the national rail network.
+            - "auto": automatically infers the network based on station IDs; if the origin
+            and destination belong to different networks, INTERCHANGE_TO transfers are allowed.
 
-    回傳：
-        dict,包含:
-        - found: 是否找到路線。
-        - origin_id, destination_id: 起訖站 ID。
-        - total_time_min: 預估總旅行時間，單位為分鐘。
-        - path: 依序排列的站點清單。
-        - legs: 每一段路線的 from/to station、relationship_type、line 與 travel_time_min。
+    Returns:
+        dict, including:
+        - found: whether a route was found.
+        - origin_id, destination_id: the origin and destination station IDs.
+        - total_time_min: the estimated total travel time, in minutes.
+        - path: an ordered list of stations.
+        - legs: each route segment’s from/to station, relationship_type, line,
+        and travel_time_min.
     """
-    rel_pattern = _relationship_pattern(network, origin_id, destination_id)
+    origin_id = origin_id.upper()
+    destination_id = destination_id.upper()
+    avoid_station_id = avoid_station_id.upper()
+    rel_pattern = _alternative_relationship_pattern(network)
+    max_routes = max(1, int(max_routes))
+    max_depth = 12
 
     cypher = f"""
-    MATCH path = (a {{station_id: $origin_id}})-[:{rel_pattern}*1..8]-(b {{station_id: $destination_id}})
+    MATCH path = (a {{station_id: $origin_id}})-[:{rel_pattern}*1..{max_depth}]-(b {{station_id: $destination_id}})
     WHERE all(i IN range(0, size(nodes(path)) - 2)
               WHERE NOT nodes(path)[i] IN nodes(path)[i + 1..])
     WITH path,
@@ -314,66 +361,69 @@ def query_cheapest_route(
     fare_class: str = "standard",
 ) :
     """
-    查詢兩個站點之間「估計費用最低」的路線。
+    Queries the route with the lowest estimated cost between two stations.
 
-    用途：
-        根據 Neo4j graph relationship 上的 fare_usd、fare_standard 或 fare_first,
-        找出從起點到終點估計交通費用最低的路線。
-        本函數重視「費用最低」，不是旅行時間最短。
+    Purpose:
+        Finds the route with the lowest estimated transportation cost from the origin
+        to the destination based on fare_usd, fare_standard, or fare_first on Neo4j
+        graph relationships.
+        This function prioritizes the lowest cost, not the shortest travel time.
 
-    適合使用：
-        - 使用者詢問最便宜路線、最低票價、cheapest route 或 lowest fare。
-        - 使用者想比較從 A 到 B 哪條路線花費較少。
-        - 使用者明確表示比起速度，更在意票價或費用。
-        - 使用者詢問 standard 或 first class 的估計路線費用。
+    Suitable for:
+        - When the user asks for the cheapest route, lowest fare, cheapest route, or lowest fare.
+        - When the user wants to compare which route from A to B costs less.
+        - When the user explicitly states that they care more about fare or cost than speed.
+        - When the user asks for the estimated route cost for standard or first class.
 
-    不適合使用：
-        - 若使用者詢問最快路線、最短時間、quickest route 或 fastest route,
-          請改用 query_shortest_route。
-        - 若使用者詢問避開某站、封站、延誤繞路或替代路線，
-          請改用 query_alternative_routes。
-        - 若使用者詢問某站延誤會影響哪些站，
-          請改用 query_delay_ripple。
-        - 若使用者只問某站直接連到哪些站，
-          請改用 query_station_connections。
-        - 若使用者要查詢實際訂票價格、座位價格、班次票價或 booking 資訊，
-          不應使用本函數；本函數只提供 graph route 的估計費用。
+    Not suitable for:
+        - If the user asks for the fastest route, shortest time, quickest route, or fastest route,
+        use query_shortest_route instead.
+        - If the user asks about avoiding a station, station closure, delay detours,
+        or alternative routes, use query_alternative_routes instead.
+        - If the user asks which stations would be affected by a delay at a certain station,
+        use query_delay_ripple instead.
+        - If the user only asks which stations are directly connected to a certain station,
+        use query_station_connections instead.
+        - If the user wants to query actual ticket prices, seat prices, service fares,
+        or booking information, this function should not be used; this function only provides
+        estimated costs for graph routes.
 
-    參數：
+    Parameters:
         origin_id:
-            起點站 ID。
-            Metro station ID 以 "MS" 開頭，例如 "MS01"。
-            National rail station ID 以 "NR" 開頭，例如 "NR01"。
+            The origin station ID.
+            Metro station IDs start with "MS", for example "MS01".
+            National rail station IDs start with "NR", for example "NR01".
         destination_id:
-            終點站 ID。
-            格式同 origin_id,例如 "MS09" 或 "NR05"。
+            The destination station ID.
+            Same format as origin_id, such as "MS09" or "NR05".
         network:
-            搜尋網路範圍。
-            - "metro"：只搜尋 metro network。
-            - "rail"：只搜尋 national rail network。
-            - "auto"：自動判斷搜尋範圍，必要時允許跨網路轉乘。
+            The search network scope.
+            - "metro": only searches the metro network.
+            - "rail": only searches the national rail network.
+            - "auto": automatically determines the search scope and allows cross-network
+            transfers when necessary.
         fare_class:
-            National rail 的票價等級。
-            - "standard"：使用 fare_standard。
-            - "first"：使用 fare_first。
-            Metro links 使用 fare_usd。
-            INTERCHANGE_TO 轉乘步行通常視為 0 元。
+            The fare class for national rail.
+            - "standard": uses fare_standard.
+            - "first": uses fare_first.
+            Metro links use fare_usd.
+            INTERCHANGE_TO walking transfers are usually treated as 0 dollars.
 
-    回傳：
-        dict,包含:
-        - found: 是否找到路線。
-        - origin_id: 起點站 ID。
-        - destination_id: 終點站 ID。
-        - fare_class: 使用的 rail fare class。
-        - total_fare_usd: 預估總費用，單位為美元。
-        - stations: 依序排列的站點清單。
-        - legs: 每一段路線，包含 from/to station、relationship_type、line、
-          fare_usd 等資訊。
+    Returns:
+        dict, including:
+        - found: whether a route was found.
+        - origin_id: the origin station ID.
+        - destination_id: the destination station ID.
+        - fare_class: the rail fare class used.
+        - total_fare_usd: the estimated total cost, in USD.
+        - stations: an ordered list of stations.
+        - legs: each route segment, including from/to station, relationship_type, line,
+        fare_usd, and other information.
 
-    範例使用情境：
-        使用者問：「從 MS01 到 NR05 最便宜怎麼走？」
-        使用者問:「What is the cheapest route from Central Square to Stonehaven?」
-        使用者問:「NR01 到 NR05 first class 最低費用路線是哪一條？」
+    Example use cases:
+        User asks: “What is the cheapest way to get from MS01 to NR05?”
+        User asks: “What is the cheapest route from Central Square to Stonehaven?”
+        User asks: “Which first-class route from NR01 to NR05 has the lowest cost?”
     """
     rel_pattern = _relationship_pattern(network, origin_id, destination_id)
     fare_class = (fare_class or "standard").lower()
@@ -464,71 +514,74 @@ def query_alternative_routes(
     max_routes: int = 3,
 ) :
     """
-    查詢避開指定站點的替代路線。
+    Queries alternative routes that avoid a specified station.
 
-    用途：
-        根據 Neo4j graph 找出從起點到終點的可行替代路線，
-        並排除任何包含 avoid_station_id 的路徑。
-        本函數主要用於封站、延誤、中斷、繞路與替代方案情境。
+    Purpose:
+        Finds feasible alternative routes from the origin to the destination based on the Neo4j graph,
+        while excluding any paths that contain avoid_station_id.
+        This function is mainly used for station closures, delays, disruptions, detours,
+        and alternative route scenarios.
 
-    適合使用：
-        - 使用者詢問 alternative route、替代路線或其他走法。
-        - 使用者明確要求避開某一站，例如「不要經過 NR03」。
-        - 使用者表示某站關閉、施工、延誤、中斷或 disruption。
-        - 使用者問「如果某站不能走，要怎麼從 A 到 B」。
-        - 使用者想知道繞開問題站點後，是否仍有可行路線。
+    Suitable for:
+        - When the user asks for an alternative route, alternative routes, or another way to go.
+        - When the user explicitly asks to avoid a certain station, such as “do not pass through NR03.”
+        - When the user indicates that a station is closed, under construction, delayed,
+        disrupted, or affected by a disruption.
+        - When the user asks “if a certain station is unavailable, how can I get from A to B?”
+        - When the user wants to know whether a feasible route still exists after avoiding
+        a problem station.
 
-    不適合使用：
-        - 若使用者只是一般詢問最快路線，且沒有提到避開站點或替代方案，
-          請改用 query_shortest_route。
-        - 若使用者詢問最便宜路線或最低票價，
-          請改用 query_cheapest_route。
-        - 若使用者主要想知道 metro 與 national rail 在哪裡轉乘，
-          且沒有要求避開任何站，請改用 query_interchange_path。
-        - 若使用者只想知道某站延誤會影響哪些附近站點，
-          請改用 query_delay_ripple。
-        - 若使用者只問某站直接連到哪些站，
-          請改用 query_station_connections。
+    Not suitable for:
+        - If the user is simply asking for the fastest route and does not mention avoiding
+        a station or alternative routes, use query_shortest_route instead.
+        - If the user asks for the cheapest route or lowest fare, use query_cheapest_route instead.
+        - If the user mainly wants to know where to transfer between metro and national rail,
+        and does not ask to avoid any station, use query_interchange_path instead.
+        - If the user only wants to know which nearby stations would be affected by a delay
+        at a certain station, use query_delay_ripple instead.
+        - If the user only asks which stations are directly connected to a certain station,
+        use query_station_connections instead.
 
-    參數：
+    Parameters:
         origin_id:
-            起點站 ID。
-            Metro station ID 以 "MS" 開頭，例如 "MS01"。
-            National rail station ID 以 "NR" 開頭，例如 "NR01"。
+            The origin station ID.
+            Metro station IDs start with "MS", for example "MS01".
+            National rail station IDs start with "NR", for example "NR01".
         destination_id:
-            終點站 ID。
-            格式同 origin_id,例如 "MS09" 或 "NR05"。
+            The destination station ID.
+            Same format as origin_id, such as "MS09" or "NR05".
         avoid_station_id:
-            必須避開的站點 ID。
-            回傳的任何路線中都不應包含這個站點。
-            例如 "NR03"、"MS07"。
+            The station ID that must be avoided.
+            None of the returned routes should contain this station.
+            For example, "NR03" or "MS07".
         network:
-            搜尋網路範圍。
-            - "metro"：只搜尋 metro network。
-            - "rail"：只搜尋 national rail network。
-            - "auto"：自動判斷搜尋範圍，必要時允許跨 metro / national rail 轉乘。
+            The search network scope.
+            - "metro": only searches the metro network.
+            - "rail": only searches the national rail network.
+            - "auto": automatically determines the search scope and allows cross-network
+            metro / national rail transfers when necessary.
         max_routes:
-            最多回傳幾條替代路線。
-            預設為 3。若可行路線少於此數量,則只回傳找到的路線。
+            The maximum number of alternative routes to return.
+            Defaults to 3. If fewer feasible routes exist, only the found routes are returned.
 
-    回傳：
-        list[list[dict]]。
-        外層 list 代表多條替代路線。
-        每一條路線是一個 leg list;每個 leg dict 包含：
-        - from_id: 此路段起點站 ID。
-        - from_name: 此路段起點站名稱。
-        - to_id: 此路段終點站 ID。
-        - to_name: 此路段終點站名稱。
-        - relationship_type: METRO_LINK、RAIL_LINK 或 INTERCHANGE_TO。
-        - line: metro 或 rail line 名稱；轉乘可能為 None。
-        - travel_time_min: 此路段預估時間，單位為分鐘。
+    Returns:
+        list[list[dict]].
+        The outer list represents multiple alternative routes.
+        Each route is a list of legs; each leg dict contains:
+        - from_id: the origin station ID of this leg.
+        - from_name: the origin station name of this leg.
+        - to_id: the destination station ID of this leg.
+        - to_name: the destination station name of this leg.
+        - relationship_type: METRO_LINK, RAIL_LINK, or INTERCHANGE_TO.
+        - line: the metro or rail line name; may be None for transfers.
+        - travel_time_min: the estimated travel time of this leg, in minutes.
 
-        若避開指定站點後沒有任何可行路線，回傳空 list []。
+        If no feasible route exists after avoiding the specified station, returns an empty list [].
 
-    範例使用情境：
-        使用者問：「如果 NR03 關閉,MS01 到 NR05 還有其他路線嗎？」
-        使用者問：「從 MS01 到 NR05 請避開 NR03。」
-        使用者問:「Find alternative routes from Central Square to Stonehaven avoiding Old Town Junction。」
+    Example use cases:
+        User asks: “If NR03 is closed, are there any other routes from MS01 to NR05?”
+        User asks: “Please avoid NR03 when going from MS01 to NR05.”
+        User asks: “Find alternative routes from Central Square to Stonehaven avoiding Old Town Junction.”
     """
     rel_pattern = _relationship_pattern(network, origin_id, destination_id)
     max_routes = max(1, int(max_routes))
@@ -578,59 +631,64 @@ def query_alternative_routes(
 
 def query_interchange_path(origin_id: str, destination_id: str) :
     """
-    查詢包含 metro 與 national rail 轉乘的跨網路路線。
+    Queries cross-network routes that include a transfer between metro and national rail.
 
-    用途：
-        找出從起點到終點的路線，且路線中必須包含至少一段 INTERCHANGE_TO。
-        本函數主要用於解釋 metro 與 national rail 之間如何轉乘、
-        在哪一站換乘，以及轉乘步行時間。
+    Purpose:
+        Finds a route from the origin to the destination where the route must include
+        at least one INTERCHANGE_TO segment.
+        This function is mainly used to explain how to transfer between metro and
+        national rail, where the interchange happens, and the walking time required
+        for the transfer.
 
-    適合使用：
-        - 使用者詢問 metro 和 national rail 之間如何轉乘。
-        - 使用者明確提到 interchange、transfer、轉乘、換乘或跨網路。
-        - 使用者想知道從 metro station 到 national rail station 怎麼走。
-        - 使用者想知道從 national rail station 到 metro station 怎麼走。
-        - 使用者問「在哪裡從地鐵換到國鐵」或「哪一站可以轉乘」。
+    Suitable for:
+        - When the user asks how to transfer between metro and national rail.
+        - When the user explicitly mentions interchange, transfer, transferring,
+        changing services, or cross-network travel.
+        - When the user wants to know how to get from a metro station to a national rail station.
+        - When the user wants to know how to get from a national rail station to a metro station.
+        - When the user asks “where do I transfer from metro to national rail?”
+        or “which station allows interchange?”
 
-    不適合使用：
-        - 若使用者只是一般詢問最快路線，且沒有明確要求轉乘說明，
-          請改用 query_shortest_route。
-        - 若使用者詢問最便宜路線或最低票價，
-          請改用 query_cheapest_route。
-        - 若使用者詢問避開某站、封站、延誤繞路或替代路線，
-          請改用 query_alternative_routes。
-        - 若使用者詢問某站延誤會影響哪些附近站點，
-          請改用 query_delay_ripple。
-        - 若使用者只問某站直接連到哪些站，
-          請改用 query_station_connections。
-        - 若起點和終點都在同一個網路內，且使用者沒有要求轉乘或 interchange,
-          不應優先使用本函數。
+    Not suitable for:
+        - If the user is simply asking for the fastest route and does not explicitly
+        request a transfer explanation, use query_shortest_route instead.
+        - If the user asks for the cheapest route or lowest fare,
+        use query_cheapest_route instead.
+        - If the user asks about avoiding a station, station closure, delay detours,
+        or alternative routes, use query_alternative_routes instead.
+        - If the user asks which nearby stations would be affected by a delay
+        at a certain station, use query_delay_ripple instead.
+        - If the user only asks which stations are directly connected to a certain station,
+        use query_station_connections instead.
+        - If both the origin and destination are within the same network, and the user
+        does not request a transfer or interchange, this function should not be prioritized.
 
-    參數：
+    Parameters:
         origin_id:
-            起點站 ID。
-            Metro station ID 以 "MS" 開頭，例如 "MS01"。
-            National rail station ID 以 "NR" 開頭，例如 "NR01"。
+            The origin station ID.
+            Metro station IDs start with "MS", for example "MS01".
+            National rail station IDs start with "NR", for example "NR01".
         destination_id:
-            終點站 ID。
-            格式同 origin_id,例如 "MS09" 或 "NR05"。
+            The destination station ID.
+            Same format as origin_id, such as "MS09" or "NR05".
 
-    回傳：
-        dict,包含:
-        - found: 是否找到包含轉乘的跨網路路線。
-        - origin_id: 起點站 ID。
-        - destination_id: 終點站 ID。
-        - stations: 依序排列的站點清單。
-        - interchange_points: 轉乘路段清單，包含 from_id、to_id、from_name、
-          to_name 與 walk_time_min。
-        - total_time_min: 預估總旅行時間，包含搭乘時間與轉乘步行時間。
+    Returns:
+        dict, including:
+        - found: whether a cross-network route containing an interchange was found.
+        - origin_id: the origin station ID.
+        - destination_id: the destination station ID.
+        - stations: an ordered list of stations.
+        - interchange_points: a list of interchange segments, including from_id, to_id,
+        from_name, to_name, and walk_time_min.
+        - total_time_min: the estimated total travel time, including riding time and
+        walking time for transfers.
 
-        若找不到包含 INTERCHANGE_TO 的路線,found 會是 False。
+        If no route containing INTERCHANGE_TO is found, found will be False.
 
-    範例使用情境：
-        使用者問:「MS01 到 NR05 要在哪裡轉乘？」
-        使用者問:「How do I transfer from metro to national rail from Central Square?」
-        使用者問：「從 NR01 到 MS18 的跨網路轉乘路線是什麼？」
+    Example use cases:
+        User asks: “Where do I transfer when going from MS01 to NR05?”
+        User asks: “How do I transfer from metro to national rail from Central Square?”
+        User asks: “What is the cross-network transfer route from NR01 to MS18?”
     """
     cypher = """
     MATCH path = (a {station_id: $origin_id})-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*1..8]-(b {station_id: $destination_id})
@@ -682,7 +740,7 @@ def query_interchange_path(origin_id: str, destination_id: str) :
                 return {
                     "found": False,
                     "origin_id": origin_id,
-                    "dest[r IN relationships(path) WHERE r.line IS NOT NULL | r.line] AS linesination_id": destination_id,
+                    "destination_id": destination_id,
                     "stations": [],
                     "interchange_points": [],
                     "total_time_min": None,
@@ -700,56 +758,56 @@ def query_interchange_path(origin_id: str, destination_id: str) :
 
 def query_delay_ripple(delayed_station_id: str, hops: int = 2) :
     """
-        查詢某一站延誤或中斷時，可能受影響的附近站點。
+    Queries nearby stations that may be affected when a station is delayed or disrupted.
 
-        用途：
-            從指定的 delayed_station_id 出發，在 Neo4j graph 中向外搜尋 N hops，
-            找出可能受到延誤、封閉、中斷或營運異常影響的站點。
-            本函數用於路網影響範圍分析，不是用來規劃 A 到 B 的路線。
+    Purpose:
+        Starting from the specified delayed_station_id, searches outward N hops in the Neo4j graph
+        to identify stations that may be affected by delays, closures, disruptions, or operational issues.
+        This function is used for network impact scope analysis, not for planning a route from A to B.
 
-        適合使用：
-            - 使用者詢問某站延誤會影響哪些站。
-            - 使用者詢問 disruption impact、delay ripple、ripple effect 或 affected stations。
-            - 使用者詢問某站 N stops / N hops 內有哪些站可能受影響。
-            - 使用者想知道某個 station incident 的擴散範圍。
-            - 使用者問「如果 NR03 出問題，附近哪些站會受影響」。
+    Suitable for:
+        - When the user asks which stations would be affected by a delay at a certain station.
+        - When the user asks about disruption impact, delay ripple, ripple effect, or affected stations.
+        - When the user asks which stations within N stops / N hops of a certain station may be affected.
+        - When the user wants to understand the spread of a station incident.
+        - When the user asks “If NR03 has a problem, which nearby stations would be affected?”
 
-        不適合使用：
-            - 若使用者詢問從 A 到 B 怎麼走，請改用 query_shortest_route。
-            - 若使用者詢問從 A 到 B 最便宜怎麼走，請改用 query_cheapest_route。
-            - 若使用者詢問避開某站後是否有替代路線，
-            請改用 query_alternative_routes。
-            - 若使用者詢問 metro 與 national rail 的轉乘路徑，
-            請改用 query_interchange_path。
-            - 若使用者只想知道某站直接連到哪些站，
-            請改用 query_station_connections。
+    Not suitable for:
+        - If the user asks how to get from A to B, use query_shortest_route instead.
+        - If the user asks for the cheapest way to get from A to B, use query_cheapest_route instead.
+        - If the user asks whether there is an alternative route after avoiding a station,
+        use query_alternative_routes instead.
+        - If the user asks for a transfer path between metro and national rail,
+        use query_interchange_path instead.
+        - If the user only wants to know which stations are directly connected to a certain station,
+        use query_station_connections instead.
 
-        參數：
-            delayed_station_id:
-                發生延誤、中斷或異常的起始站點 ID。
-                Metro station ID 以 "MS" 開頭，例如 "MS01"。
-                National rail station ID 以 "NR" 開頭，例如 "NR03"。
-            hops:
-                從 delayed_station_id 向外搜尋的 graph hop 數。
-                預設為 2。
-                數值越大，代表搜尋越遠的影響範圍。
-                本系統會限制 hops 在合理範圍內，避免查詢過大。
+    Parameters:
+        delayed_station_id:
+            The origin station ID where the delay, disruption, or issue occurs.
+            Metro station IDs start with "MS", for example "MS01".
+            National rail station IDs start with "NR", for example "NR03".
+        hops:
+            The number of graph hops to search outward from delayed_station_id.
+            Defaults to 2.
+            A larger value means a wider impact scope.
+            This system limits hops to a reasonable range to avoid overly large queries.
 
-        回傳:
-            list[dict]，每個 dict 代表一個可能受影響站點，包含：
-            - station_id: 受影響站點 ID。
-            - name: 受影響站點名稱。
-            - labels: Neo4j labels,例如 MetroStation 或 NationalRailStation。
-            - hops_away: 從延誤站點到該站點的最短 graph hop 數。
-            - lines_affected: 影響路徑中涉及的 metro line、rail line 或 INTERCHANGE。
+    Returns:
+        list[dict], where each dict represents a potentially affected station, including:
+        - station_id: the affected station ID.
+        - name: the affected station name.
+        - labels: Neo4j labels, such as MetroStation or NationalRailStation.
+        - hops_away: the shortest graph hop count from the delayed station to this station.
+        - lines_affected: the metro line, rail line, or INTERCHANGE involved in the affected path.
 
-            若找不到任何受影響站點，回傳空 list []。
+        If no affected stations are found, returns an empty list [].
 
-        範例使用情境：
-            使用者問:「NR03 延誤會影響哪些站？」
-            使用者問:「Show affected stations within 2 hops of Old Town Junction。」
-            使用者問:「如果 MS01 出問題，附近兩站內會被波及嗎？」
-        """
+    Example use cases:
+        User asks: “Which stations would be affected by a delay at NR03?”
+        User asks: “Show affected stations within 2 hops of Old Town Junction.”
+        User asks: “If MS01 has a problem, would stations within two stops nearby be affected?”
+    """
     hops = max(1, min(int(hops), 10))
 
     cypher = f"""

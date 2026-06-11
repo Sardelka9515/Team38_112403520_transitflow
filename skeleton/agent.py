@@ -1,39 +1,8 @@
-"""
-TransitFlow — Intelligent Agent
-================================
-This is the brain of the system.
-
-HOW IT WORKS (the pipeline students should understand):
-  1. User asks a natural language question
-  2. The LLM reads the question and decides which databases to query
-     (this is called "tool use" or "function calling")
-  3. Each database query runs and returns structured data
-  4. The LLM reads all the data and writes a helpful answer
-  5. The answer is returned to the Gradio UI
-
-THE THREE DATABASE ROLES IN THIS FILE:
-  - Relational (PostgreSQL)  → schedules, fares, bookings, seat layouts, users
-  - Vector (pgvector / RAG)  → policy documents (refunds, conduct, luggage, etc.)
-  - Graph (Neo4j)            → route finding, delay ripple, cross-network paths
-
-STUDENT TASK
-------------
-You do NOT need to rewrite this file.
-Your goal is to make the database queries richer by:
-  1. Adding more data to PostgreSQL (new tables, more seed data)
-  2. Writing better Cypher in databases/graph/queries.py
-  3. Adding more policy documents (databases/vector/documents.py)
-
-The agent will automatically use whatever you put in the databases.
-"""
-
 from __future__ import annotations
-
 import json
 import re
 from datetime import date
 from typing import Optional
-
 from skeleton.llm_provider import llm
 from databases.relational.queries import (
     query_national_rail_availability,
@@ -56,11 +25,7 @@ from databases.graph.queries import (
     query_delay_ripple,
 )
 
-
-# ── Station name → ID lookup (resolved in Python, not by the LLM) ────────────
-
-_STATION_INDEX: dict[str, str] = {
-    # Metro
+_STATION_INDEX = {
     "central square": "MS01", "riverside":   "MS02", "northgate":  "MS03",
     "elm park":       "MS04", "westfield":   "MS05", "harbour view": "MS06",
     "old town":       "MS07", "university":  "MS08", "queensbridge": "MS09",
@@ -68,7 +33,6 @@ _STATION_INDEX: dict[str, str] = {
     "clifton":        "MS13", "eastwick":    "MS14", "ferndale":   "MS15",
     "hilltop":        "MS16", "broadmoor":   "MS17", "sunnyvale":  "MS18",
     "redwood":        "MS19", "thornton":    "MS20",
-    # National Rail (longer/specific names first so they match before shorter substrings)
     "central station":   "NR01", "maplewood":     "NR02",
     "old town junction": "NR03", "ashford":        "NR04",
     "stonehaven":        "NR05", "bridgeport":     "NR06",
@@ -77,7 +41,7 @@ _STATION_INDEX: dict[str, str] = {
 }
 
 
-def _inject_station_ids(text: str) -> str:
+def _inject_station_ids(text):
     """
     Replace station names in text with 'name (ID)' so the LLM reads the ID
     right next to the name and uses it as the parameter value.
@@ -85,7 +49,7 @@ def _inject_station_ids(text: str) -> str:
     Returns the original text unchanged when no stations are found.
     """
     result = text
-    seen_ids: set[str] = set()
+    seen_ids = set()
     for name in sorted(_STATION_INDEX, key=len, reverse=True):
         sid = _STATION_INDEX[name]
         if sid in seen_ids:
@@ -95,9 +59,6 @@ def _inject_station_ids(text: str) -> str:
             result = pattern.sub(f"{name} ({sid})", result)
             seen_ids.add(sid)
     return result
-
-
-# ── System prompt ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are TransitFlow, a transit assistant for a dual-network system.
 
@@ -121,9 +82,6 @@ For route results:
 
 Always reply in the same language as the user.
 """.format(today=date.today().isoformat())
-
-
-# ── Tool definitions (sent to the LLM to decide which to call) ────────────────
 
 TOOLS = [
     {
@@ -274,8 +232,13 @@ TOOLS = [
         "required": ["origin_id", "destination_id"],
     },
     {
-        "name": "find_alternative_routes",
-        "description": "Find routes that avoid a specific delayed or closed station.",
+    "name": "find_alternative_routes",
+    "description": (
+        "Find routes that avoid a specific delayed or closed station. "
+        "Use network='auto' by default so the search can include both Metro, "
+        "National Rail, and INTERCHANGE_TO transfer links. This is important "
+        "for disruption detours where a route may need to switch from NR to MS "
+        "or from MS to NR."),
         "parameters": {
             "origin_id":        {"type": "string", "description": "e.g. NR01"},
             "destination_id":   {"type": "string", "description": "e.g. NR05"},
@@ -309,18 +272,11 @@ search_policy(query)
 find_alternative_routes(origin_id, destination_id, avoid_station_id, network?)
 get_delay_ripple(station_id, hops?)"""
 
-
-# ── Agent logic ───────────────────────────────────────────────────────────────
-
 def _execute_tool(
-    tool_name: str,
-    params: dict,
-    current_user_email: Optional[str] = None,
-) -> str:
-    """
-    Execute a tool call and return the result as a JSON string.
-    This is where the LLM's decision meets the actual databases.
-    """
+    tool_name,
+    params,
+    current_user_email = None,
+):
     try:
         if tool_name == "check_national_rail_availability":
             result = query_national_rail_availability(**params)
@@ -447,11 +403,15 @@ def _execute_tool(
                 )
 
         elif tool_name == "find_alternative_routes":
+            origin_id = params["origin_id"].upper()
+            destination_id = params["destination_id"].upper()
+            avoid_station_id = params["avoid_station_id"].upper()
+            network = "auto"
             routes = query_alternative_routes(
-                origin_id=params["origin_id"],
-                destination_id=params["destination_id"],
-                avoid_station_id=params["avoid_station_id"],
-                network=params.get("network", "auto"),
+                origin_id=origin_id,
+                destination_id=destination_id,
+                avoid_station_id=avoid_station_id,
+                network=network,
             )
             result = [{"route_number": i + 1, "legs": r} for i, r in enumerate(routes)]
 
@@ -470,8 +430,7 @@ def _execute_tool(
         return json.dumps({"error": str(e)})
 
 
-def _flatten_to_text(obj, depth: int = 0) -> str:
-    """Recursively convert any JSON value to indented key-value text."""
+def _flatten_to_text(obj, depth = 0):
     pad = "  " * depth
     if isinstance(obj, dict):
         if not obj:
@@ -502,12 +461,7 @@ def _flatten_to_text(obj, depth: int = 0) -> str:
         return f"{pad}{obj}"
 
 
-def _normalise_result(tool_name: str, result_json: str) -> str:
-    """
-    Convert raw tool JSON to structured readable text for the answer LLM.
-    Pure Python — works for any tool output without per-tool code.
-    Students never need to touch this when adding new tools.
-    """
+def _normalise_result(tool_name, result_json):
     try:
         data = json.loads(result_json)
     except json.JSONDecodeError:
@@ -516,11 +470,7 @@ def _normalise_result(tool_name: str, result_json: str) -> str:
         return f"Error: {data['error']}"
     return _flatten_to_text(data)
 
-def _format_route_answer(tool_name: str, result_json: str, user_message: str) -> Optional[str]:
-    """
-    Deterministically format route-related tool results.
-    This avoids small local LLMs hallucinating routes, times, stations, or login requirements.
-    """
+def _format_route_answer(tool_name, result_json, user_message):
     try:
         data = json.loads(result_json)
     except json.JSONDecodeError:
@@ -618,19 +568,11 @@ def _format_route_answer(tool_name: str, result_json: str, user_message: str) ->
     return None
 
 
-def _summarise_result(tool_name: str, result_json: str) -> str:
-    """Raw result string shown in the debug panel only."""
+def _summarise_result(tool_name, result_json):
     return result_json
 
 
-def _parse_tool_calls(llm_response: str) -> list[dict] | None:
-    """
-    Parse tool call JSON from the LLM response.
-
-    The LLM is prompted to respond ONLY with a JSON block when it wants
-    to call tools. Format:
-        {"tool_calls": [{"name": "...", "params": {...}}, ...]}
-    """
+def _parse_tool_calls(llm_response):
     import re
     text = llm_response.strip()
     if text.startswith("```"):
@@ -638,8 +580,6 @@ def _parse_tool_calls(llm_response: str) -> list[dict] | None:
         if text.startswith("json"):
             text = text[4:]
         text = text.strip()
-    # raw_decode stops after the first complete JSON object, so it handles both
-    # preamble text and multiple JSON objects in one response (common on small models).
     decoder = json.JSONDecoder()
     for m in re.finditer(r'\{', text):
         try:
@@ -650,28 +590,62 @@ def _parse_tool_calls(llm_response: str) -> list[dict] | None:
             continue
     return None
 
+def _extract_alternative_route_ids(message: str, station_ids: list[str]):
+    if len(station_ids) < 3:
+        return None, None, None
+
+    def _first_id_after(patterns):
+        for pattern in patterns:
+            m = re.search(pattern, message, re.IGNORECASE)
+            if m:
+                return m.group(1).upper()
+        return None
+
+    avoid_id = _first_id_after([
+        r"\bavoid(?:ing)?\b[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b",
+        r"\b(?:closed|closure|blocked|disrupted|delayed)\b[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b",
+        r"\b(?:disruption|delay)\s+(?:at|on|near)?\s*[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b",
+        r"\bwithout\b[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b",
+        r"\bnot\s+pass\s+through\b[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b",
+    ])
+
+    origin_id = destination_id = None
+
+    from_to = re.search(
+        r"\bfrom\b[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b.*?\bto\b[^\n,.?;:]*?\b(MS\d{2}|NR\d{2})\b",
+        message,
+        re.IGNORECASE,
+    )
+    if from_to:
+        origin_id = from_to.group(1).upper()
+        destination_id = from_to.group(2).upper()
+
+    if not avoid_id and origin_id and destination_id:
+        for sid in station_ids:
+            if sid not in {origin_id, destination_id}:
+                avoid_id = sid
+                break
+
+    if avoid_id and (not origin_id or not destination_id):
+        remaining = [sid for sid in station_ids if sid != avoid_id]
+        if len(remaining) >= 2:
+            origin_id = remaining[0]
+            destination_id = remaining[1]
+
+    if not avoid_id and len(station_ids) >= 3:
+        avoid_id = station_ids[0]
+        origin_id = station_ids[1]
+        destination_id = station_ids[2]
+
+    return origin_id, destination_id, avoid_id
 
 def run_agent(
-    user_message: str,
-    history: list[dict],
-    debug: bool = False,
-    current_user_email: Optional[str] = None,
-) -> tuple:
-    """
-    Main agent loop.
-
-    Args:
-        user_message:       The user's latest message
-        history:            Conversation history (list of {role, content} dicts)
-        debug:              If True, also return internal tool call info
-        current_user_email: Email of the logged-in user, or None for guests
-
-    Returns:
-        (assistant_reply, updated_history) or (assistant_reply, updated_history, debug_info)
-    """
+    user_message,
+    history,
+    debug = False,
+    current_user_email = None,
+):
     debug_info = []
-
-    # Build a context-aware system prompt based on login state
     if current_user_email:
         profile = query_user_profile(current_user_email)
         if profile:
@@ -690,13 +664,7 @@ def run_agent(
             "If the user asks about personal bookings, history, or wants to make/cancel a booking, "
             "tell them they must log in first."
         )
-
-    # Step 1: Ask the LLM which tools to call
-    # Include recent history so the LLM can extract params from multi-turn flows.
     recent_history = history[-4:] if len(history) > 4 else history
-
-    # Substitute station names with 'name (ID)' inline so the LLM reads the ID
-    # directly next to each name and uses it as the parameter value.
     _augmented_message = _inject_station_ids(user_message)
 
     tool_selection_prompt = f"""Output only this JSON (no other text):
@@ -730,8 +698,6 @@ Examples:
 JSON:"""
 
     if llm.get_chat_provider() == "ollama":
-        # llama3.2:1b is fine-tuned for native tool calling — far more reliable than
-        # prompt-based JSON routing which produces malformed output on 1B models.
         tool_calls = llm.ollama_tool_call(
             recent_history, TOOLS, _augmented_message,
             system_prompt=(
@@ -761,11 +727,6 @@ JSON:"""
         tool_calls = _parse_tool_calls(selection_response) or []
         if debug:
             debug_info.append(f"**Tool selection:** {selection_response}")
-
-    # ── Deterministic fallbacks ────────────────────────────────────────────────
-    # llama3.2:1b is unreliable for tool routing on anything beyond trivial queries.
-    # Rules below cover every common query type.  Each rule only fires when the
-    # correct tool is not already selected with valid required params.
     _user_station_ids_raw = re.findall(
         r'\b(MS\d{2}|NR\d{2})\b',
         user_message,
@@ -854,27 +815,25 @@ JSON:"""
             },
             "delay ripple impact query",
         )
-
-    # 0. Alternative / disruption routing — must run before normal route fallback.
-    elif _is_alternative and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3):
+    elif (_is_alternative and not has_alternative_tool and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3)):
         ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
-
-        avoid_station_id = ids_for_alt[0].upper()
-        origin_id = ids_for_alt[1].upper()
-        destination_id = ids_for_alt[2].upper()
-
-        _fallback(
-            "find_alternative_routes",
-            {
-                "origin_id": origin_id,
-                "destination_id": destination_id,
-                "avoid_station_id": avoid_station_id,
-                "network": "auto",
-            },
-            "alternative/disruption route query",
+        origin_id, destination_id, avoid_station_id = _extract_alternative_route_ids(
+            _augmented_message,
+            ids_for_alt,
         )
 
-    # 1. Route / directions / path — also corrects wrong-tool selections.
+        if origin_id and destination_id and avoid_station_id:
+            has_alternative_tool = any(call.get("name") == "find_alternative_routes" for call in tool_calls)
+            _fallback(
+                "find_alternative_routes",
+                {
+                    "origin_id": origin_id,
+                    "destination_id": destination_id,
+                    "avoid_station_id": avoid_station_id,
+                    "network": "auto",
+                },
+                "alternative/disruption route query",
+            )
     elif _is_route and _two_stations:
         _opt = "cost" if any(kw in _lower for kw in _cost_triggers) else "time"
         existing = next((c for c in tool_calls if c.get("name") == "find_route"), None)
