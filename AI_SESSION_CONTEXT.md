@@ -399,13 +399,32 @@ CREATE INDEX IF NOT EXISTS policy_documents_embedding_idx ON policy_documents US
 
 ```
 Node labels:
-- TODO
+- `MetroStation`: Represents a station in the city metro network.
+- `NationalRailStation`: Represents a station in the national rail network.
 
 Relationship types:
-- TODO
+- `METRO_LINK` (directed, seeded both ways): Connecting adjacent metro stations.
+- `RAIL_LINK` (directed, seeded both ways): Connecting adjacent national rail stations.
+- `INTERCHANGE_TO` (directed, seeded both ways): Connecting a metro station and a rail station for transfer.
 
 Key properties:
-- TODO
+- `MetroStation` / `NationalRailStation`:
+  - `station_id` (string): Unique business ID (e.g., "MS01", "NR01")
+  - `name` (string): Station name
+  - `lines` (list of strings): Lines passing through this station (e.g., `["M1", "M2"]` or `["NR1"]`)
+  - `is_interchange_metro` (boolean): Whether it allows transfer between metro lines
+  - `is_interchange_national_rail` (boolean): Whether it allows transfer to/from national rail
+- `METRO_LINK`:
+  - `line` (string): The metro line name (e.g., "M1", "M2")
+  - `travel_time_min` (integer): Travel time in minutes
+  - `fare_usd` (float): Cost of this segment (seeded as 1.0)
+- `RAIL_LINK`:
+  - `line` (string): The rail line name (e.g., "NR1", "NR2")
+  - `travel_time_min` (integer): Travel time in minutes
+  - `fare_standard` (float): Standard class fare (seeded as 2.0)
+  - `fare_first` (float): First class fare (seeded as 4.0)
+- `INTERCHANGE_TO`:
+  - `walk_time_min` (integer): Walk time between stations (seeded as 5)
 ```
 
 ## Function Signatures We Are Implementing
@@ -452,9 +471,9 @@ def query_station_connections(station_id: str) -> list[dict]: ...
 
 <!-- Add entries as you make decisions. Format: "Decision: X. Why: Y." -->
 
-- [ ] Schema design: TODO — add your table/column decisions here
-- [ ] Graph schema: TODO — add your node label and relationship type decisions here
-- [ ] (example) Metro schedule stop ordering: using `jsonb_array_elements` approach — easier to debug than containment operators
+- [x] Schema design: Use surrogate PKs (UUID/SERIAL) alongside UNIQUE NOT NULL business IDs (e.g. "RU01", "MS01") to maintain compatibility with existing application code/agent while ensuring proper constraints. Keep relational and graph schemas decoupled (no adjacency lists in Postgres).
+- [x] Graph schema: Model stations as `MetroStation` and `NationalRailStation` nodes. Store `line` on the relationships (`METRO_LINK` / `RAIL_LINK`) rather than separate `Line` nodes to keep queries fast (minimal hops). Store fares directly on edges for Dijkstra-based cheapest path routing.
+- [x] (example) Metro schedule stop ordering: using `jsonb_array_elements` approach — easier to debug than containment operators
 
 ## Prompts That Worked
 
@@ -462,10 +481,19 @@ def query_station_connections(station_id: str) -> list[dict]: ...
 
 ### Schema design prompt that worked:
 ```
-TODO — add a prompt here after your schema design workshop
+Based on the mock data in train-mock-data/ (e.g., registered_users.json, bookings.json, metro_stations.json, etc.), generate a PostgreSQL DDL schema. Follow these rules:
+1. Use a Surrogate Key Pattern: Use UUID (gen_random_uuid()) for public-facing tables (users, bookings, payments) and SERIAL for internal structural tables (stations, schedules, layouts, coaches, seats).
+2. Keep the original business IDs (like 'RU01', 'MS01') as UNIQUE NOT NULL columns so existing application code works.
+3. Configure appropriate foreign key constraints with ON DELETE CASCADE for dependent child tables, ON DELETE RESTRICT for critical transactional tables, and ON DELETE SET NULL/RESTRICT where appropriate.
+4. Separate relational data from graph/adjacency details (no adjacency/topology lists in Postgres).
 ```
 
 ### Query implementation prompt that worked:
 ```
-TODO — add after implementing your first function
+Implement query functions in databases/graph/queries.py to query Neo4j.
+1. Use neo4j driver and the _driver() helper.
+2. In query_shortest_route, use apoc.algo.dijkstra to find the fastest path between two stations using the weight 'travel_time_min'.
+3. In query_cheapest_route, use apoc.algo.dijkstra with weight 'fare_usd' for metro or 'fare_standard' / 'fare_first' for rail.
+4. Handle the 'auto' network option by checking origin and destination ID prefixes ('MS' for metro, 'NR' for national rail).
+5. Ensure return types are JSON-serializable (convert types, do not return raw Neo4j nodes/relationships directly, convert floats/ints/strings).
 ```
