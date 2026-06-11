@@ -960,6 +960,93 @@ def query_policy_vector_search(embedding: list[float], top_k: int = VECTOR_TOP_K
             return [dict(row) for row in cur.fetchall()]
 
 
+def query_policy_keyword_search(
+    query: str,
+    top_k: int = VECTOR_TOP_K,
+    category: Optional[str] = None,
+) -> list[dict]:
+    """
+    Keyword / full-text search over policy documents.
+
+    This complements pgvector retrieval for policy questions where exact terms
+    matter, such as refund windows, cancellation fees, ticket types, luggage,
+    pets, bicycles, or booking deadlines.
+
+    Args:
+        query:    Natural language policy question.
+        top_k:    Number of keyword candidates to return.
+        category: Optional metadata category inferred by rag.py.
+
+    Returns:
+        List of dicts with policy document metadata and a keyword score.
+    """
+    cleaned_query = (query or "").strip()
+    if not cleaned_query:
+        return []
+
+    # Full-text search gives a real lexical relevance score.
+    # ILIKE fallback catches exact phrases and short terms that full-text search
+    # may ignore, e.g. "2 hours", "pet", "bike".
+    sql = """
+        WITH q AS (
+            SELECT
+                plainto_tsquery('english', %(query)s) AS tsq,
+                %(like_query)s AS like_query,
+                %(category)s AS category_filter
+        )
+        SELECT
+            pd.id,
+            pd.title,
+            pd.category,
+            pd.content,
+            pd.source_file,
+            pd.created_at,
+            ts_rank_cd(
+                to_tsvector(
+                    'english',
+                    coalesce(pd.title, '') || ' ' ||
+                    coalesce(pd.category, '') || ' ' ||
+                    coalesce(pd.content, '')
+                ),
+                q.tsq
+            ) AS keyword_score
+        FROM policy_documents pd
+        CROSS JOIN q
+        WHERE
+            (
+                to_tsvector(
+                    'english',
+                    coalesce(pd.title, '') || ' ' ||
+                    coalesce(pd.category, '') || ' ' ||
+                    coalesce(pd.content, '')
+                ) @@ q.tsq
+                OR lower(pd.title)    LIKE q.like_query
+                OR lower(pd.category) LIKE q.like_query
+                OR lower(pd.content)  LIKE q.like_query
+            )
+            AND (
+                q.category_filter IS NULL
+                OR lower(pd.category) LIKE '%%' || lower(q.category_filter) || '%%'
+            )
+        ORDER BY
+            keyword_score DESC,
+            pd.title ASC
+        LIMIT %(top_k)s
+    """
+
+    params = {
+        "query": cleaned_query,
+        "like_query": f"%{cleaned_query.lower()}%",
+        "category": category,
+        "top_k": top_k,
+    }
+
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+
+
 def store_policy_document(
     title: str,
     category: str,
