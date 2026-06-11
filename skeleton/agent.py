@@ -2,7 +2,6 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
-from typing import Optional
 from skeleton.llm_provider import llm
 from databases.relational.queries import (
     query_national_rail_availability,
@@ -475,7 +474,9 @@ def _format_route_answer(tool_name, result_json, user_message):
         data = json.loads(result_json)
     except json.JSONDecodeError:
         return None
-
+    
+    if not re.search(r"[\u4e00-\u9fff]", user_message):
+        return None
     if isinstance(data, dict) and data.get("error"):
         return f"查詢時發生錯誤：{data['error']}"
 
@@ -675,6 +676,7 @@ STATIONS: Metro=MS01-MS20, Rail=NR01-NR10
 USER: {current_user_email or "not logged in"}
 get_user_bookings: call (no params) when logged-in user asks about their bookings, tickets, or travel history.
 make_booking/cancel_booking: only if user is logged in.
+Alternative/avoid/closed/disrupted route questions: use find_alternative_routes.
 Route/path/journey questions: use find_route. Policy questions: use search_policy.
 Never use "" as a param value. Omit optional params if unknown.
 
@@ -715,6 +717,7 @@ JSON:"""
                 "Rail fare/cost/price questions → check_national_rail_availability then get_national_rail_fare. "
                 "Schedule/timetable/trains/services questions → check_national_rail_availability or check_metro_availability. "
                 "Only call a tool when needed. Output nothing except tool calls."
+                "Alternative/avoid/closed/disrupted route questions → find_alternative_routes. "
             ),
         )
         if debug:
@@ -732,6 +735,8 @@ JSON:"""
         user_message,
         re.IGNORECASE,
     )
+
+    tool_calls = tool_calls or []
 
     _user_station_ids = []
     for sid in _user_station_ids_raw:
@@ -801,6 +806,51 @@ JSON:"""
         and len(_station_ids) >= 1
     )
 
+    def _clean_station_id(value):
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+        return None
+
+
+    ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
+    parsed_origin_id, parsed_destination_id, parsed_avoid_station_id = _extract_alternative_route_ids(
+        _augmented_message,
+        ids_for_alt,
+    )
+
+    cleaned_tool_calls = []
+
+    for call in tool_calls:
+        if call.get("name") != "find_alternative_routes":
+            cleaned_tool_calls.append(call)
+            continue
+
+        params = call.setdefault("params", {})
+
+        origin_id = _clean_station_id(params.get("origin_id")) or parsed_origin_id
+        destination_id = _clean_station_id(params.get("destination_id")) or parsed_destination_id
+        avoid_station_id = _clean_station_id(params.get("avoid_station_id")) or parsed_avoid_station_id
+
+        if origin_id and destination_id and avoid_station_id:
+            params["origin_id"] = origin_id
+            params["destination_id"] = destination_id
+            params["avoid_station_id"] = avoid_station_id
+            params["network"] = "auto"
+            cleaned_tool_calls.append(call)
+        else:
+            if debug:
+                debug_info.append(
+                    "**Correction:** skipped incomplete find_alternative_routes params "
+                    f"and will try fallback parsing. params={params}"
+                )
+
+    tool_calls = cleaned_tool_calls
+
+    has_alternative_tool = any(
+        call.get("name") == "find_alternative_routes"
+        for call in tool_calls
+    )
+
     if _is_delay_impact:
         station_id = _station_ids[0].upper()
 
@@ -815,15 +865,20 @@ JSON:"""
             },
             "delay ripple impact query",
         )
-    elif (_is_alternative and not has_alternative_tool and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3)):
+
+    elif (
+        _is_alternative
+        and not has_alternative_tool
+        and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3)
+    ):
         ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
+
         origin_id, destination_id, avoid_station_id = _extract_alternative_route_ids(
             _augmented_message,
             ids_for_alt,
         )
 
         if origin_id and destination_id and avoid_station_id:
-            has_alternative_tool = any(call.get("name") == "find_alternative_routes" for call in tool_calls)
             _fallback(
                 "find_alternative_routes",
                 {
@@ -834,7 +889,7 @@ JSON:"""
                 },
                 "alternative/disruption route query",
             )
-    elif _is_route and _two_stations:
+    elif _is_route and _two_stations and not _is_alternative and not has_alternative_tool:
         _opt = "cost" if any(kw in _lower for kw in _cost_triggers) else "time"
         existing = next((c for c in tool_calls if c.get("name") == "find_route"), None)
 

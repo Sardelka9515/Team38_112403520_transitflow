@@ -237,9 +237,9 @@ def query_station_connections(station_id: str) :
 
 
 def query_shortest_route(
-    origin_id: str,
-    destination_id: str,
-    network: str = "auto",
+    origin_id,
+    destination_id,
+    network = "auto",
 ) :
     """
     Purpose:
@@ -289,10 +289,8 @@ def query_shortest_route(
     """
     origin_id = origin_id.upper()
     destination_id = destination_id.upper()
-    avoid_station_id = avoid_station_id.upper()
-    rel_pattern = _alternative_relationship_pattern(network)
-    max_routes = max(1, int(max_routes))
-    max_depth = 12
+    rel_pattern = _relationship_pattern(network, origin_id, destination_id)
+    max_depth = 8
 
     cypher = f"""
     MATCH path = (a {{station_id: $origin_id}})-[:{rel_pattern}*1..{max_depth}]-(b {{station_id: $destination_id}})
@@ -507,11 +505,11 @@ def query_cheapest_route(
 
 
 def query_alternative_routes(
-    origin_id: str,
-    destination_id: str,
-    avoid_station_id: str,
-    network: str = "auto",
-    max_routes: int = 3,
+    origin_id,
+    destination_id,
+    avoid_station_id,
+    network = "auto",
+    max_routes = 3,
 ) :
     """
     Queries alternative routes that avoid a specified station.
@@ -583,14 +581,18 @@ def query_alternative_routes(
         User asks: “Please avoid NR03 when going from MS01 to NR05.”
         User asks: “Find alternative routes from Central Square to Stonehaven avoiding Old Town Junction.”
     """
-    rel_pattern = _relationship_pattern(network, origin_id, destination_id)
+    origin_id = origin_id.upper()
+    destination_id = destination_id.upper()
+    avoid_station_id = avoid_station_id.upper()
+    rel_pattern = _alternative_relationship_pattern(network)
     max_routes = max(1, int(max_routes))
+    max_depth = 12
 
     cypher = f"""
-    MATCH path = (a {{station_id: $origin_id}})-[:{rel_pattern}*1..8]-(b {{station_id: $destination_id}})
+    MATCH path = (a {{station_id: $origin_id}})-[:{rel_pattern}*1..{max_depth}]-(b {{station_id: $destination_id}})
     WHERE NONE(n IN nodes(path) WHERE n.station_id = $avoid_station_id)
-      AND all(i IN range(0, size(nodes(path)) - 2)
-              WHERE NOT nodes(path)[i] IN nodes(path)[i + 1..])
+    AND all(i IN range(0, size(nodes(path)) - 2)
+            WHERE NOT nodes(path)[i] IN nodes(path)[i + 1..])
     WITH path,
          [n IN nodes(path) | n.station_id] AS route_key,
          reduce(total = 0, r IN relationships(path) |
