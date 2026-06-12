@@ -59,3 +59,10 @@ gradio_cached_examples/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Team deliverables submitted separately via EEClass (not in the shared repo)
+Team38_DESIGN_DOC.md
+Team38_WORK_ALLOCATION.md
+Team38_*_PEER_REVIEW.md
+grading/
+grading.zip

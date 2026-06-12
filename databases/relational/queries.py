@@ -20,6 +20,10 @@ The vector functions (query_policy_vector_search, store_policy_document)
 are already implemented — do not modify them.
 """
 
+# TASK 6 EXTENSION: This file contains bonus-feature query functions
+#   query_platform_assignment, query_service_delays, query_loyalty_balance,
+#   plus loyalty-point award logic inside execute_booking. See TASK6.md.
+
 from __future__ import annotations
 
 import uuid

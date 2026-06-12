@@ -42,6 +42,9 @@ Station ID rules:
 - National rail station IDs start with "NR", for example "NR01".
 """
 
+# TASK 6 EXTENSION: This file contains the bonus-feature query function
+#   query_stations_by_zone (metro fare-zone lookup). See TASK6.md.
+
 from __future__ import annotations
 
 from typing import Optional

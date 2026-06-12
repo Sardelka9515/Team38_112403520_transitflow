@@ -9,6 +9,9 @@ You must first design and create your tables in databases/relational/schema.sql.
 Safe to re-run: implement your inserts with ON CONFLICT DO NOTHING.
 """
 
+# TASK 6 EXTENSION: Adds seed functions seed_platform_assignments and
+#   seed_delay_records (called from main()). See TASK6.md.
+
 import json
 import os
 import sys
@@ -352,14 +355,21 @@ def seed_feedback(cur):
     insert_many(cur, "national_rail_feedbacks", ["feedback_id", "booking_id", "user_id", "rating", "comment", "submitted_at"], rail_feedbacks)
 
 
+# TASK 6 EXTENSION: seed the bonus platform-assignment data.
 def seed_platform_assignments(cur):
+    # Each JSON row is a (schedule, station) pair plus its platform number.
+    # insert_many uses ON CONFLICT DO NOTHING, so re-running is idempotent —
+    # the composite PK (schedule_id, station_id) prevents duplicate rows.
     data = load("platform_assignments.json")
     rows = [(r["schedule_id"], r["station_id"], r["platform_number"]) for r in data]
     n = insert_many(cur, "platform_assignments", ["schedule_id", "station_id", "platform_number"], rows)
     print(f"  platform_assignments: {n} rows")
 
 
+# TASK 6 EXTENSION: seed the bonus historical delay log.
 def seed_delay_records(cur):
+    # `reason` is optional in the source data, so we default it to None via .get();
+    # delay_id is UNIQUE, so ON CONFLICT DO NOTHING keeps the seed idempotent.
     data = load("delay_records.json")
     rows = [
         (r["delay_id"], r["schedule_id"], r["travel_date"], r["delay_minutes"], r.get("reason"))
