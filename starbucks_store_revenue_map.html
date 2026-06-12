@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_fd86cedffba43d95af4565a353c8e959 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+
+            <style>html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            </style>
+
+            <style>#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            </style>
+
+            <script>
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            </script>
+
+        
+</head>
+<body>
+    
+    
+    <div style="
+        position: fixed;
+        bottom: 50px;
+        left: 50px;
+        width: 190px;
+        background-color: white;
+        border: 2px solid grey;
+        z-index: 9999;
+        font-size: 14px;
+        padding: 10px;
+        font-family: Arial, 'Microsoft JhengHei', sans-serif;
+        box-shadow: 2px 2px 6px rgba(0,0,0,0.25);
+        ">
+        <b>營收級距</b><br>
+        <span style="color:green; font-size:18px;">●</span> 低營收<br>
+        <span style="color:orange; font-size:18px;">●</span> 中營收<br>
+        <span style="color:red; font-size:18px;">●</span> 高營收<br>
+        <small>圓圈越大代表營收越高</small>
+    </div>
+    
+    
+            <div class="folium-map" id="map_fd86cedffba43d95af4565a353c8e959" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_fd86cedffba43d95af4565a353c8e959 = L.map(
+                "map_fd86cedffba43d95af4565a353c8e959",
+                {
+                    center: [24.36461675, 121.05136974999999],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 8,
+  "zoomControl": true,
+  "preferCanvas": false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_affc548026d49ce4abc45e764c765c17 = L.tileLayer(
+                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                {
+  "minZoom": 0,
+  "maxZoom": 19,
+  "maxNativeZoom": 19,
+  "noWrap": false,
+  "attribution": "\u0026copy; \u003ca href=\"https://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_affc548026d49ce4abc45e764c765c17.addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+            var circle_marker_57af3a5cd0604aba1e79de389352ab82 = L.circleMarker(
+                [25.033964, 121.564468],
+                {"bubblingMouseEvents": true, "color": "red", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "red", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 30.0, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_dc800efef439c66530bb307578373e0e = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_a4bf817569627d68cf23b18ea56baaab = $(`<div id="html_a4bf817569627d68cf23b18ea56baaab" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 台北101門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S001</td></tr>                 <tr><td><b>城市：</b></td><td>台北市</td></tr>                 <tr><td><b>行政區：</b></td><td>信義區</td></tr>                 <tr><td><b>地址：</b></td><td>台北市信義區市府路45號</td></tr>                 <tr><td><b>營收：</b></td><td>1.85 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>185,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>10.00 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_dc800efef439c66530bb307578373e0e.setContent(html_a4bf817569627d68cf23b18ea56baaab);
+            
+        
+
+        circle_marker_57af3a5cd0604aba1e79de389352ab82.bindPopup(popup_dc800efef439c66530bb307578373e0e)
+        ;
+
+        
+    
+    
+            circle_marker_57af3a5cd0604aba1e79de389352ab82.bindTooltip(
+                `<div>
+                     Starbucks 台北101門市｜營收 1.85 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_3ba31405aa555b03258da83b059a59dc = L.circleMarker(
+                [25.04214, 121.50769],
+                {"bubblingMouseEvents": true, "color": "orange", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "orange", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 17.317073170731707, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_ea80e6d6ed2654c4e56b847fa18bb8bb = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_01333ca7b29b6bbf967e01d2832069b4 = $(`<div id="html_01333ca7b29b6bbf967e01d2832069b4" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 西門門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S002</td></tr>                 <tr><td><b>城市：</b></td><td>台北市</td></tr>                 <tr><td><b>行政區：</b></td><td>萬華區</td></tr>                 <tr><td><b>地址：</b></td><td>台北市萬華區漢中街附近</td></tr>                 <tr><td><b>營收：</b></td><td>1.20 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>132,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>9.10 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_ea80e6d6ed2654c4e56b847fa18bb8bb.setContent(html_01333ca7b29b6bbf967e01d2832069b4);
+            
+        
+
+        circle_marker_3ba31405aa555b03258da83b059a59dc.bindPopup(popup_ea80e6d6ed2654c4e56b847fa18bb8bb)
+        ;
+
+        
+    
+    
+            circle_marker_3ba31405aa555b03258da83b059a59dc.bindTooltip(
+                `<div>
+                     Starbucks 西門門市｜營收 1.20 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_fd6af7c498eabd32bcb87b7deb05337c = L.circleMarker(
+                [25.04776, 121.51703],
+                {"bubblingMouseEvents": true, "color": "red", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "red", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 26.097560975609753, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_21b87fab94d399d4f96be8589690ec8f = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_16a5ff69eb896bd2584009f09144c147 = $(`<div id="html_16a5ff69eb896bd2584009f09144c147" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 台北車站門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S003</td></tr>                 <tr><td><b>城市：</b></td><td>台北市</td></tr>                 <tr><td><b>行政區：</b></td><td>中正區</td></tr>                 <tr><td><b>地址：</b></td><td>台北市中正區北平西路3號附近</td></tr>                 <tr><td><b>營收：</b></td><td>1.65 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>170,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>9.70 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_21b87fab94d399d4f96be8589690ec8f.setContent(html_16a5ff69eb896bd2584009f09144c147);
+            
+        
+
+        circle_marker_fd6af7c498eabd32bcb87b7deb05337c.bindPopup(popup_21b87fab94d399d4f96be8589690ec8f)
+        ;
+
+        
+    
+    
+            circle_marker_fd6af7c498eabd32bcb87b7deb05337c.bindTooltip(
+                `<div>
+                     Starbucks 台北車站門市｜營收 1.65 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_308026657835294feae750a48c47abce = L.circleMarker(
+                [25.01407, 121.46477],
+                {"bubblingMouseEvents": true, "color": "orange", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "orange", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 15.365853658536588, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_5c6902deadf77ea08e5b5ee81147c7da = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_de93dbe485b300fe688b56407444ee44 = $(`<div id="html_de93dbe485b300fe688b56407444ee44" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 板橋大遠百門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S004</td></tr>                 <tr><td><b>城市：</b></td><td>新北市</td></tr>                 <tr><td><b>行政區：</b></td><td>板橋區</td></tr>                 <tr><td><b>地址：</b></td><td>新北市板橋區新站路28號附近</td></tr>                 <tr><td><b>營收：</b></td><td>1.10 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>118,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>9.30 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_5c6902deadf77ea08e5b5ee81147c7da.setContent(html_de93dbe485b300fe688b56407444ee44);
+            
+        
+
+        circle_marker_308026657835294feae750a48c47abce.bindPopup(popup_5c6902deadf77ea08e5b5ee81147c7da)
+        ;
+
+        
+    
+    
+            circle_marker_308026657835294feae750a48c47abce.bindTooltip(
+                `<div>
+                     Starbucks 板橋大遠百門市｜營收 1.10 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_de9402fe7599a26764ffb592d56776c3 = L.circleMarker(
+                [24.968, 121.194],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 6.0, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_37e3e715691f1532ace7f1b1b82d3ce0 = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_497aab202db300afc50689540f0e8d87 = $(`<div id="html_497aab202db300afc50689540f0e8d87" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 中央大學附近門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S005</td></tr>                 <tr><td><b>城市：</b></td><td>桃園市</td></tr>                 <tr><td><b>行政區：</b></td><td>中壢區</td></tr>                 <tr><td><b>地址：</b></td><td>桃園市中壢區中大路附近</td></tr>                 <tr><td><b>營收：</b></td><td>0.62 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>73,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>8.50 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_37e3e715691f1532ace7f1b1b82d3ce0.setContent(html_497aab202db300afc50689540f0e8d87);
+            
+        
+
+        circle_marker_de9402fe7599a26764ffb592d56776c3.bindPopup(popup_37e3e715691f1532ace7f1b1b82d3ce0)
+        ;
+
+        
+    
+    
+            circle_marker_de9402fe7599a26764ffb592d56776c3.bindTooltip(
+                `<div>
+                     Starbucks 中央大學附近門市｜營收 0.62 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_095f22268af2ca3404423e42d6caeea9 = L.circleMarker(
+                [24.151, 120.663],
+                {"bubblingMouseEvents": true, "color": "red", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "red", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 19.26829268292683, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_948e1d2ad6c31a48a66e5db0a11672fc = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_7db515ce03317882862b29b741a33ea8 = $(`<div id="html_7db515ce03317882862b29b741a33ea8" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 台中勤美門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S006</td></tr>                 <tr><td><b>城市：</b></td><td>台中市</td></tr>                 <tr><td><b>行政區：</b></td><td>西區</td></tr>                 <tr><td><b>地址：</b></td><td>台中市西區公益路68號附近</td></tr>                 <tr><td><b>營收：</b></td><td>1.30 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>141,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>9.20 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_948e1d2ad6c31a48a66e5db0a11672fc.setContent(html_7db515ce03317882862b29b741a33ea8);
+            
+        
+
+        circle_marker_095f22268af2ca3404423e42d6caeea9.bindPopup(popup_948e1d2ad6c31a48a66e5db0a11672fc)
+        ;
+
+        
+    
+    
+            circle_marker_095f22268af2ca3404423e42d6caeea9.bindTooltip(
+                `<div>
+                     Starbucks 台中勤美門市｜營收 1.30 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_b5e4cdf9f98bb9df7cf674a98f16b6be = L.circleMarker(
+                [22.991, 120.198],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 12.439024390243901, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_120efa9b826c51bb5337bd58254ba5cf = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_75db43ab7c35caa62cfd6416be931cc2 = $(`<div id="html_75db43ab7c35caa62cfd6416be931cc2" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 台南新光三越門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S007</td></tr>                 <tr><td><b>城市：</b></td><td>台南市</td></tr>                 <tr><td><b>行政區：</b></td><td>中西區</td></tr>                 <tr><td><b>地址：</b></td><td>台南市中西區西門路一段附近</td></tr>                 <tr><td><b>營收：</b></td><td>0.95 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>106,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>9.00 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_120efa9b826c51bb5337bd58254ba5cf.setContent(html_75db43ab7c35caa62cfd6416be931cc2);
+            
+        
+
+        circle_marker_b5e4cdf9f98bb9df7cf674a98f16b6be.bindPopup(popup_120efa9b826c51bb5337bd58254ba5cf)
+        ;
+
+        
+    
+    
+            circle_marker_b5e4cdf9f98bb9df7cf674a98f16b6be.bindTooltip(
+                `<div>
+                     Starbucks 台南新光三越門市｜營收 0.95 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+            var circle_marker_cbe95947bbdd40b982a7c8c9c6287b3e = L.circleMarker(
+                [22.669, 120.302],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.65, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 14.390243902439025, "stroke": true, "weight": 3}
+            ).addTo(map_fd86cedffba43d95af4565a353c8e959);
+        
+    
+        var popup_4beadf517cf4f6a562e92ab0624269d4 = L.popup({
+  "maxWidth": 380,
+});
+
+        
+            
+                var html_65d61edd81da7a3026bb453d879e7613 = $(`<div id="html_65d61edd81da7a3026bb453d879e7613" style="width: 100.0%; height: 100.0%;">         <div style="min-width:280px; font-family:Arial, 'Microsoft JhengHei', sans-serif;">             <h4 style="margin:0 0 8px 0;">Starbucks 高雄漢神巨蛋門市</h4>             <table style="font-size:13px; line-height:1.6;">                 <tr><td><b>店號：</b></td><td>S008</td></tr>                 <tr><td><b>城市：</b></td><td>高雄市</td></tr>                 <tr><td><b>行政區：</b></td><td>左營區</td></tr>                 <tr><td><b>地址：</b></td><td>高雄市左營區博愛二路附近</td></tr>                 <tr><td><b>營收：</b></td><td>1.05 百萬 USD</td></tr>                          <tr><td><b>交易次數：</b></td><td>113,000</td></tr>                              <tr><td><b>平均客單價：</b></td><td>9.30 USD</td></tr>                          </table>         </div>         </div>`)[0];
+                popup_4beadf517cf4f6a562e92ab0624269d4.setContent(html_65d61edd81da7a3026bb453d879e7613);
+            
+        
+
+        circle_marker_cbe95947bbdd40b982a7c8c9c6287b3e.bindPopup(popup_4beadf517cf4f6a562e92ab0624269d4)
+        ;
+
+        
+    
+    
+            circle_marker_cbe95947bbdd40b982a7c8c9c6287b3e.bindTooltip(
+                `<div>
+                     Starbucks 高雄漢神巨蛋門市｜營收 1.05 百萬 USD
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+</script>
+</html>

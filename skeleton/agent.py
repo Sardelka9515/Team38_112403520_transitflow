@@ -884,24 +884,6 @@ JSON:"""
             },
             "delay ripple impact query",
         )
-    elif _is_alternative and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3):
-        ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
-
-        avoid_station_id = ids_for_alt[0].upper()
-        origin_id = ids_for_alt[1].upper()
-        destination_id = ids_for_alt[2].upper()
-
-        _fallback(
-            "find_alternative_routes",
-            {
-                "origin_id": origin_id,
-                "destination_id": destination_id,
-                "avoid_station_id": avoid_station_id,
-                "network": "auto",
-            },
-            "alternative/disruption route query",
-        )
-    elif _is_route and _two_stations:
 
     elif (
         _is_alternative
@@ -926,6 +908,7 @@ JSON:"""
                 },
                 "alternative/disruption route query",
             )
+
     elif _is_route and _two_stations and not _is_alternative and not has_alternative_tool:
         _opt = "cost" if any(kw in _lower for kw in _cost_triggers) else "time"
         existing = next((c for c in tool_calls if c.get("name") == "find_route"), None)
