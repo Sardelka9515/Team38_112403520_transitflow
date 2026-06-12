@@ -857,3 +857,34 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) :
                 })
 
             return rows
+
+
+# ── ZONE QUERIES ─────────────────────────────────────────────────────────────
+
+def query_stations_by_zone(zone: int) -> list[dict]:
+    """
+    Return all MetroStation nodes in a given fare zone.
+
+    Args:
+        zone: 1, 2, or 3
+
+    Returns:
+        List of dicts with station_id, name, zone, lines, ordered by station_id.
+    """
+    cypher = """
+    MATCH (s:MetroStation {zone: $zone})
+    RETURN s.station_id AS station_id, s.name AS name, s.zone AS zone, s.lines AS lines
+    ORDER BY s.station_id
+    """
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run(cypher, zone=zone)
+            return [
+                {
+                    "station_id": record["station_id"],
+                    "name":       record["name"],
+                    "zone":       record["zone"],
+                    "lines":      list(record["lines"]) if record["lines"] else [],
+                }
+                for record in result
+            ]

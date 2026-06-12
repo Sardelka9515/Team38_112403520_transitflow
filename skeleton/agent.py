@@ -14,6 +14,9 @@ from databases.relational.queries import (
     query_user_bookings,
     execute_booking,
     execute_cancellation,
+    query_platform_assignment,
+    query_service_delays,
+    query_loyalty_balance,
 )
 from skeleton.rag import hybrid_policy_search
 from databases.graph.queries import (
@@ -22,6 +25,7 @@ from databases.graph.queries import (
     query_alternative_routes,
     query_interchange_path,
     query_delay_ripple,
+    query_stations_by_zone,
 )
 
 _STATION_INDEX = {
@@ -255,6 +259,52 @@ TOOLS = [
         },
         "required": ["station_id"],
     },
+    {
+        "name": "get_platform",
+        "description": (
+            "Get the departure platform number for a national rail service at a specific station. "
+            "Use when the user asks about platforms, departure boards, or which platform to go to."
+        ),
+        "parameters": {
+            "schedule_id": {"type": "string", "description": "e.g. NR_SCH01"},
+            "station_id":  {"type": "string", "description": "e.g. NR01"},
+        },
+        "required": ["schedule_id", "station_id"],
+    },
+    {
+        "name": "get_service_delays",
+        "description": (
+            "Look up historical train delay records for national rail services. "
+            "Use when the user asks whether a service was delayed, about past delays on a route, "
+            "or delay history."
+        ),
+        "parameters": {
+            "schedule_id": {"type": "string", "description": "e.g. NR_SCH01 (optional)"},
+            "travel_date": {"type": "string", "description": "YYYY-MM-DD (optional)"},
+        },
+        "required": [],
+    },
+    {
+        "name": "get_loyalty_points",
+        "description": (
+            "Show the logged-in user's loyalty points balance and recent earning history. "
+            "REQUIRES LOGIN. No parameters needed."
+        ),
+        "parameters": {},
+        "required": [],
+    },
+    {
+        "name": "get_stations_by_zone",
+        "description": (
+            "List all metro stations in a specific fare zone (1, 2, or 3). "
+            "Use when the user asks which stations are in zone 1, 2, or 3, "
+            "or asks about zone-based fares."
+        ),
+        "parameters": {
+            "zone": {"type": "integer", "description": "Zone number: 1, 2, or 3"},
+        },
+        "required": ["zone"],
+    },
 ]
 
 TOOLS_SCHEMA = """\
@@ -269,7 +319,11 @@ cancel_booking(booking_id)
 get_user_bookings()
 search_policy(query)
 find_alternative_routes(origin_id, destination_id, avoid_station_id, network?)
-get_delay_ripple(station_id, hops?)"""
+get_delay_ripple(station_id, hops?)
+get_platform(schedule_id, station_id)
+get_service_delays(schedule_id?, travel_date?)
+get_loyalty_points()
+get_stations_by_zone(zone)"""
 
 def _execute_tool(
     tool_name,
@@ -413,6 +467,26 @@ def _execute_tool(
                 delayed_station_id=params["station_id"],
                 hops=params.get("hops", 2),
             )
+
+        elif tool_name == "get_platform":
+            result = query_platform_assignment(
+                schedule_id=params["schedule_id"],
+                station_id=params["station_id"],
+            )
+
+        elif tool_name == "get_service_delays":
+            result = query_service_delays(
+                schedule_id=params.get("schedule_id"),
+                travel_date=params.get("travel_date"),
+            )
+
+        elif tool_name == "get_loyalty_points":
+            if not current_user_email:
+                return json.dumps({"error": "You must be logged in to view loyalty points."})
+            result = query_loyalty_balance(current_user_email)
+
+        elif tool_name == "get_stations_by_zone":
+            result = query_stations_by_zone(zone=int(params["zone"]))
 
         else:
             result = {"error": f"Unknown tool: {tool_name}"}
@@ -737,6 +811,10 @@ JSON:"""
                 "Schedule/timetable/trains/services questions → check_national_rail_availability or check_metro_availability. "
                 "Only call a tool when needed. Output nothing except tool calls."
                 "Alternative/avoid/closed/disrupted route questions → find_alternative_routes. "
+                "Platform / which platform / departure board questions → get_platform. "
+                "Delay history / past delays / was there a delay questions → get_service_delays. "
+                "Loyalty points / my points / points balance questions → get_loyalty_points (login required). "
+                "Zone stations / stations in zone / zone 1 or 2 or 3 questions → get_stations_by_zone. "
             ),
         )
         if debug:
@@ -865,9 +943,83 @@ JSON:"""
 
     tool_calls = cleaned_tool_calls
 
+    # Correct parameters for the bonus tools. The small router model often fills
+    # schedule_id with a station-style ID (e.g. "NR05") or mis-reads the zone,
+    # so we re-extract the real values from the user message via regex.
+    _schedule_ids = []
+    for raw in re.findall(r'\bNR[_ ]?SCH\d+\b', _augmented_message, re.IGNORECASE):
+        digits = re.search(r'\d+', raw).group(0)
+        sid = f"NR_SCH{digits}"
+        if sid not in _schedule_ids:
+            _schedule_ids.append(sid)
+
+    _nr_station_ids = [s for s in _station_ids if s.startswith("NR")]
+    _zone_match = re.search(r'\bzone\s*([123])\b', _lower)
+
+    def _valid_schedule_id(v):
+        return isinstance(v, str) and re.fullmatch(r'NR_SCH\d+', v.strip().upper() or "")
+
+    for call in tool_calls:
+        name = call.get("name")
+        params = call.setdefault("params", {})
+
+        if name == "get_platform":
+            if not _valid_schedule_id(params.get("schedule_id")) and _schedule_ids:
+                params["schedule_id"] = _schedule_ids[0]
+            elif isinstance(params.get("schedule_id"), str):
+                params["schedule_id"] = params["schedule_id"].strip().upper()
+            sid = _clean_station_id(params.get("station_id"))
+            if (not sid or not sid.startswith("NR")) and _nr_station_ids:
+                sid = _nr_station_ids[0]
+            if sid:
+                params["station_id"] = sid
+
+        elif name == "get_service_delays":
+            if _valid_schedule_id(params.get("schedule_id")):
+                params["schedule_id"] = params["schedule_id"].strip().upper()
+            elif _schedule_ids:
+                params["schedule_id"] = _schedule_ids[0]
+            else:
+                params.pop("schedule_id", None)
+            td = params.get("travel_date")
+            if not (isinstance(td, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', td.strip() or "")):
+                params.pop("travel_date", None)
+
+        elif name == "get_stations_by_zone":
+            if _zone_match:
+                params["zone"] = int(_zone_match.group(1))
+            else:
+                try:
+                    params["zone"] = int(params.get("zone"))
+                except (TypeError, ValueError):
+                    params.pop("zone", None)
+
+        elif name == "search_policy":
+            # The router sometimes echoes the parameter schema instead of a query.
+            q = params.get("query")
+            params.clear()
+            params["query"] = q.strip() if isinstance(q, str) and q.strip() else user_message
+
     has_alternative_tool = any(
         call.get("name") == "find_alternative_routes"
         for call in tool_calls
+    )
+
+    has_service_delay_tool = any(
+        call.get("name") == "get_service_delays"
+        for call in tool_calls
+    )
+
+    # Historical delay-log query (distinct from the graph ripple-impact query):
+    # "were there delays on NR_SCH01", "delay history", "any late-running trains".
+    _is_service_delay = (
+        not _is_delay_impact
+        and not (_is_alternative and (len(_station_ids) >= 3 or len(_user_station_ids) >= 3))
+        and any(kw in _lower for kw in ["delay", "delayed", "delays", "late-running", "late running"])
+        and (
+            len(_schedule_ids) >= 1
+            or any(w in _lower for w in ["recent", "history", "past", "last month", "previous", "ever been"])
+        )
     )
 
     if _is_delay_impact:
@@ -884,7 +1036,14 @@ JSON:"""
             },
             "delay ripple impact query",
         )
-
+    elif _is_service_delay and not has_service_delay_tool:
+        params = {}
+        if _schedule_ids:
+            params["schedule_id"] = _schedule_ids[0]
+        _td = re.search(r'\d{4}-\d{2}-\d{2}', _lower)
+        if _td:
+            params["travel_date"] = _td.group(0)
+        _fallback("get_service_delays", params, "service delay history query")
     elif (
         _is_alternative
         and not has_alternative_tool

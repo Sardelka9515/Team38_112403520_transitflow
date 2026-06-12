@@ -170,5 +170,48 @@
       }
     ],
     "exclusions": "Delays caused by third-party events (extreme weather, security incidents, government directives, or passenger-caused incidents) are not eligible for compensation."
+  },
+  {
+    "policy_id": "RF-PF-01",
+    "label": "Penalty Fares",
+    "applies_to": {
+      "network_type": "all",
+      "description": "Applies to all passengers travelling on metro or national rail services without a valid ticket."
+    },
+    "penalty_amount": {
+      "rule": "The penalty fare is the greater of $20.00 or five times the applicable single fare for the journey being made.",
+      "minimum_usd": 20.00,
+      "multiplier": 5
+    },
+    "escalation": {
+      "initial_notice_period_days": 14,
+      "escalated_penalty_usd": 100.00,
+      "escalation_rule": "If the initial penalty fare is unpaid within 14 days of issue, the amount escalates to $100.00 and may be referred to a debt collection agency."
+    },
+    "when_penalty_applies": [
+      "Travelling without a valid ticket",
+      "Presenting an expired, forged, or invalid ticket",
+      "Travelling beyond the destination shown on the ticket",
+      "Failing to present a ticket when asked by authorised staff"
+    ],
+    "appeal_process": "Passengers who believe a penalty fare was issued incorrectly may appeal within 14 days of the issue date via the customer service portal."
+  },
+  {
+    "policy_id": "RF-EW-01",
+    "label": "Engineering Works Compensation",
+    "applies_to": {
+      "network_type": "national_rail",
+      "ticket_types": ["single", "return"]
+    },
+    "entitlement": {
+      "rule": "If a national rail service is cancelled due to planned engineering works and the passenger was not notified of the cancellation at the time of booking, a full automatic refund is issued with no admin fee.",
+      "refund_percent": 100,
+      "admin_fee_usd": 0.00,
+      "trigger": "Service cancelled due to planned engineering works; passenger not informed at booking"
+    },
+    "notification_standard": "Passengers are considered 'notified' if the engineering works cancellation was published on the TransitFlow app, website, or by email at least 48 hours before the scheduled departure.",
+    "how_refund_is_processed": "Refunds are processed automatically within 5 business days to the original payment method. No claim is required.",
+    "alternative_travel": "Where engineering works affect a service, TransitFlow will endeavour to provide alternative travel arrangements (replacement bus service or alternative route). Passengers who decline the alternative and choose not to travel are still entitled to a full refund.",
+    "exclusions": "This policy does not apply to delays caused by unplanned emergency engineering works or third-party infrastructure incidents."
   }
 ]
