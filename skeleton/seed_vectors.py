@@ -14,6 +14,9 @@ Students: To extend the assistant's knowledge, add entries to the JSON files in
 train-mock-data/ and re-run this script.
 """
 
+# TASK 6 EXTENSION: build_documents() embeds the new policy sections
+#   group_bookings, lost_property, and accessibility (corpus 13 -> 18). See TASK6.md.
+
 import json
 import os
 import sys

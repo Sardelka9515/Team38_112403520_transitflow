@@ -1,3 +1,7 @@
+# TASK 6 EXTENSION: Wires four bonus tools into the agent —
+#   get_platform, get_service_delays, get_loyalty_points, get_stations_by_zone —
+#   plus regex parameter-correction/fallbacks for the local router. See TASK6.md.
+
 from __future__ import annotations
 import json
 import re

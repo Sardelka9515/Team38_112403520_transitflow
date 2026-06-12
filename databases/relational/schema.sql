@@ -313,6 +313,12 @@ CREATE TABLE IF NOT EXISTS national_rail_feedbacks (
 );
 
 -- ============================================================
+-- TASK 6 EXTENSION: bonus-feature schema objects below —
+--   tables platform_assignments, delay_records, loyalty_transactions,
+--   and the users.loyalty_points column. See TASK6.md.
+-- ============================================================
+
+-- ============================================================
 -- Platform Assignments
 -- ============================================================
 

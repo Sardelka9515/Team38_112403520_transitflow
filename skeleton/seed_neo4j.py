@@ -11,6 +11,9 @@ Design your graph schema (node labels, relationship types, properties)
 based on the data in these files, then implement the seed() function below.
 """
 
+# TASK 6 EXTENSION: Writes the bonus `zone` property onto MetroStation nodes
+#   during seeding (metro fare zones 1-3). See TASK6.md.
+
 import json
 import os
 import sys
