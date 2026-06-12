@@ -313,6 +313,56 @@ CREATE TABLE IF NOT EXISTS national_rail_feedbacks (
 );
 
 -- ============================================================
+-- Platform Assignments
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS platform_assignments (
+    -- Maps each national rail service (schedule) to a platform at each station it stops at.
+    -- One row per (schedule, station) pair — a service always departs from the same platform.
+    schedule_id     VARCHAR(50) REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE,
+    station_id      VARCHAR(50) REFERENCES national_rail_stations(station_id)   ON DELETE CASCADE,
+    platform_number VARCHAR(10) NOT NULL,
+    PRIMARY KEY (schedule_id, station_id)
+);
+
+-- ============================================================
+-- Service Delay Records
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS delay_records (
+    -- Historical log of operator-reported delays per national rail service and date.
+    -- Complements the graph-based delay ripple analysis with real recorded data.
+    id            SERIAL PRIMARY KEY,
+    delay_id      VARCHAR(50) UNIQUE NOT NULL,
+    schedule_id   VARCHAR(50) REFERENCES national_rail_schedules(schedule_id) ON DELETE CASCADE,
+    travel_date   DATE NOT NULL,
+    delay_minutes INT NOT NULL CHECK (delay_minutes > 0),
+    reason        VARCHAR(255),
+    reported_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS delay_records_schedule_date_idx ON delay_records (schedule_id, travel_date);
+
+-- ============================================================
+-- Loyalty Points
+-- ============================================================
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS loyalty_points INT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS loyalty_transactions (
+    -- Audit trail of every loyalty point earn/redeem event.
+    -- positive points = earned (booking), negative = redeemed (future use).
+    id          SERIAL PRIMARY KEY,
+    user_id     VARCHAR(50) REFERENCES users(user_id) ON DELETE CASCADE,
+    trip_ref    VARCHAR(50),          -- booking_id that triggered this transaction
+    points      INT NOT NULL,
+    reason      VARCHAR(100) NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_transactions_user_idx ON loyalty_transactions (user_id);
+
+-- ============================================================
 --  VECTOR SCHEMA  (RAG / Help Desk) — do not modify
 -- ============================================================
 

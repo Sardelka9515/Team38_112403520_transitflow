@@ -60,12 +60,14 @@ def seed():
                 MERGE (s:MetroStation {station_id: $station_id})
                 SET
                     s.name = $name,
+                    s.zone = $zone,
                     s.lines = $lines,
                     s.is_interchange_metro = $is_interchange_metro,
                     s.is_interchange_national_rail = $is_interchange_national_rail
                 """,
                 station_id=station["station_id"],
                 name=station["name"],
+                zone=station.get("zone"),
                 lines=station.get("lines", []),
                 is_interchange_metro=station.get("is_interchange_metro", False),
                 is_interchange_national_rail=station.get("is_interchange_national_rail", False),

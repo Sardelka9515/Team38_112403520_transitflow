@@ -352,6 +352,23 @@ def seed_feedback(cur):
     insert_many(cur, "national_rail_feedbacks", ["feedback_id", "booking_id", "user_id", "rating", "comment", "submitted_at"], rail_feedbacks)
 
 
+def seed_platform_assignments(cur):
+    data = load("platform_assignments.json")
+    rows = [(r["schedule_id"], r["station_id"], r["platform_number"]) for r in data]
+    n = insert_many(cur, "platform_assignments", ["schedule_id", "station_id", "platform_number"], rows)
+    print(f"  platform_assignments: {n} rows")
+
+
+def seed_delay_records(cur):
+    data = load("delay_records.json")
+    rows = [
+        (r["delay_id"], r["schedule_id"], r["travel_date"], r["delay_minutes"], r.get("reason"))
+        for r in data
+    ]
+    n = insert_many(cur, "delay_records", ["delay_id", "schedule_id", "travel_date", "delay_minutes", "reason"], rows)
+    print(f"  delay_records: {n} rows")
+
+
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -374,6 +391,8 @@ def main():
         seed_metro_travels(cur)
         seed_payments(cur)
         seed_feedback(cur)
+        seed_platform_assignments(cur)
+        seed_delay_records(cur)
         conn.commit()
         print("\nAll done. Database seeded successfully.")
     except Exception as e:

@@ -61,7 +61,7 @@ def build_documents():
 
     # booking_rules.json — one document per network section
     br = _load("booking_rules.json")
-    for section in ("national_rail", "metro", "general_rules"):
+    for section in ("national_rail", "metro", "general_rules", "group_bookings"):
         if section in br:
             docs.append({
                 "title": f"Booking Rules — {section.replace('_', ' ').title()}",
@@ -72,7 +72,7 @@ def build_documents():
 
     # travel_policies.json — one document per network section
     tp = _load("travel_policies.json")
-    for section in ("metro", "national_rail"):
+    for section in ("metro", "national_rail", "lost_property", "accessibility"):
         if section in tp:
             docs.append({
                 "title": f"Travel Policies — {section.replace('_', ' ').title()}",

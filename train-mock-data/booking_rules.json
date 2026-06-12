@@ -104,6 +104,25 @@
       "check_in": "Tap QR code at the station gate scanner to begin journey."
     }
   },
+  "group_bookings": {
+    "policy_id": "BR-GRP-01",
+    "label": "Group Booking Policy – National Rail",
+    "applies_to": "national_rail",
+    "minimum_group_size": 10,
+    "discount_percent": 10,
+    "applicable_class": "standard",
+    "advance_booking_requirement_days": 3,
+    "advance_booking_rule": "Group bookings must be made at least 3 days before the travel date.",
+    "lead_passenger": {
+      "required": true,
+      "responsibilities": "One designated lead passenger must be named at the time of booking. The lead passenger is responsible for the group and is the point of contact for any changes or queries."
+    },
+    "seating": "Group members are allocated seats in the same carriage where possible, subject to availability.",
+    "discount_application": "The 10% group discount is applied automatically when 10 or more tickets for the same schedule and travel date are booked in a single transaction.",
+    "exclusions": "Group discount does not apply to first class tickets, express services, day passes, or bookings made less than 3 days before travel.",
+    "changes_and_cancellations": "Standard refund policies (RF001 or RF002) apply to each ticket individually. Group size falling below 10 after cancellations will result in the discount being voided on remaining tickets.",
+    "payment": "Full payment is required at the time of booking."
+  },
   "general_rules": {
     "valid_id": "Passengers may be asked to show a valid photo ID matching the name on the booking. Accepted IDs include national ID card, passport, and driving licence.",
     "ticket_validity": "A ticket is only valid for the service, date, and passenger named on the booking. Tickets are non-transferable.",

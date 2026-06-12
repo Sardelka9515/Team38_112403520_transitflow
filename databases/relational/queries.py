@@ -596,6 +596,18 @@ def execute_booking(
                 VALUES (%s, %s, %s, 'credit_card', 'paid', %s)
             """, (payment_id, booking_id, amount_usd, now))
 
+            # 7. Award loyalty points (1 point per $1 spent, minimum 1)
+            points_earned = max(1, int(float(amount_usd)))
+            cur.execute(
+                "UPDATE users SET loyalty_points = loyalty_points + %s WHERE user_id = %s",
+                (points_earned, user_id),
+            )
+            cur.execute(
+                "INSERT INTO loyalty_transactions (user_id, trip_ref, points, reason) "
+                "VALUES (%s, %s, %s, %s)",
+                (user_id, booking_id, points_earned, "booking"),
+            )
+
             conn.commit()
             return (True, {
                 "booking_id": booking_id,
@@ -927,6 +939,131 @@ def update_password(email: str, new_password: str) -> bool:
         with conn.cursor() as cur:
             cur.execute(sql, (hashed, email))
             return cur.rowcount > 0
+
+
+# ── PLATFORM ASSIGNMENTS ─────────────────────────────────────────────────────
+
+def query_platform_assignment(schedule_id: str, station_id: str) -> Optional[dict]:
+    """
+    Return the platform number for a national rail service at a specific station.
+
+    Args:
+        schedule_id: e.g. "NR_SCH01"
+        station_id:  e.g. "NR01"
+
+    Returns:
+        dict with schedule_id, station_id, station_name, platform_number, line, service_type;
+        or None if no record exists.
+    """
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    pa.schedule_id,
+                    pa.station_id,
+                    st.name          AS station_name,
+                    pa.platform_number,
+                    nrs.line,
+                    nrs.service_type,
+                    nrs.direction
+                FROM platform_assignments pa
+                JOIN national_rail_stations  st  ON st.station_id   = pa.station_id
+                JOIN national_rail_schedules nrs ON nrs.schedule_id = pa.schedule_id
+                WHERE pa.schedule_id = %s AND pa.station_id = %s
+            """, (schedule_id, station_id))
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+# ── SERVICE DELAY RECORDS ─────────────────────────────────────────────────────
+
+def query_service_delays(
+    schedule_id: Optional[str] = None,
+    travel_date: Optional[str] = None,
+) -> list[dict]:
+    """
+    Return historical delay records for national rail services.
+
+    Both parameters are optional — returns all records when omitted.
+
+    Args:
+        schedule_id: e.g. "NR_SCH01" (optional)
+        travel_date: "YYYY-MM-DD" (optional)
+
+    Returns:
+        List of dicts with delay_id, schedule_id, line, service_type,
+        travel_date, delay_minutes, reason, reported_at.
+    """
+    conditions = []
+    params: list = []
+    if schedule_id:
+        conditions.append("dr.schedule_id = %s")
+        params.append(schedule_id)
+    if travel_date:
+        conditions.append("dr.travel_date = %s")
+        params.append(travel_date)
+
+    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    sql = f"""
+        SELECT
+            dr.delay_id,
+            dr.schedule_id,
+            nrs.line,
+            nrs.service_type,
+            dr.travel_date::text,
+            dr.delay_minutes,
+            dr.reason,
+            dr.reported_at::text
+        FROM delay_records dr
+        JOIN national_rail_schedules nrs ON nrs.schedule_id = dr.schedule_id
+        {where_clause}
+        ORDER BY dr.travel_date DESC, dr.delay_id
+    """
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            return [dict(row) for row in cur.fetchall()]
+
+
+# ── LOYALTY POINTS ────────────────────────────────────────────────────────────
+
+def query_loyalty_balance(user_email: str) -> Optional[dict]:
+    """
+    Return the loyalty points balance and recent transactions for a user.
+
+    Args:
+        user_email: the logged-in user's email address
+
+    Returns:
+        dict with full_name, loyalty_points, recent_transactions (last 5);
+        or None if the user is not found.
+    """
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT user_id, full_name, loyalty_points
+                FROM users
+                WHERE email = %s AND is_active = TRUE
+            """, (user_email,))
+            user = cur.fetchone()
+            if not user:
+                return None
+
+            cur.execute("""
+                SELECT trip_ref, points, reason, created_at::text
+                FROM loyalty_transactions
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT 5
+            """, (user["user_id"],))
+            transactions = [dict(row) for row in cur.fetchall()]
+
+            return {
+                "full_name":           user["full_name"],
+                "loyalty_points":      user["loyalty_points"],
+                "recent_transactions": transactions,
+            }
 
 
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────
