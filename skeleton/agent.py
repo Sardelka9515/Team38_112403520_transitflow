@@ -943,9 +943,83 @@ JSON:"""
 
     tool_calls = cleaned_tool_calls
 
+    # Correct parameters for the bonus tools. The small router model often fills
+    # schedule_id with a station-style ID (e.g. "NR05") or mis-reads the zone,
+    # so we re-extract the real values from the user message via regex.
+    _schedule_ids = []
+    for raw in re.findall(r'\bNR[_ ]?SCH\d+\b', _augmented_message, re.IGNORECASE):
+        digits = re.search(r'\d+', raw).group(0)
+        sid = f"NR_SCH{digits}"
+        if sid not in _schedule_ids:
+            _schedule_ids.append(sid)
+
+    _nr_station_ids = [s for s in _station_ids if s.startswith("NR")]
+    _zone_match = re.search(r'\bzone\s*([123])\b', _lower)
+
+    def _valid_schedule_id(v):
+        return isinstance(v, str) and re.fullmatch(r'NR_SCH\d+', v.strip().upper() or "")
+
+    for call in tool_calls:
+        name = call.get("name")
+        params = call.setdefault("params", {})
+
+        if name == "get_platform":
+            if not _valid_schedule_id(params.get("schedule_id")) and _schedule_ids:
+                params["schedule_id"] = _schedule_ids[0]
+            elif isinstance(params.get("schedule_id"), str):
+                params["schedule_id"] = params["schedule_id"].strip().upper()
+            sid = _clean_station_id(params.get("station_id"))
+            if (not sid or not sid.startswith("NR")) and _nr_station_ids:
+                sid = _nr_station_ids[0]
+            if sid:
+                params["station_id"] = sid
+
+        elif name == "get_service_delays":
+            if _valid_schedule_id(params.get("schedule_id")):
+                params["schedule_id"] = params["schedule_id"].strip().upper()
+            elif _schedule_ids:
+                params["schedule_id"] = _schedule_ids[0]
+            else:
+                params.pop("schedule_id", None)
+            td = params.get("travel_date")
+            if not (isinstance(td, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', td.strip() or "")):
+                params.pop("travel_date", None)
+
+        elif name == "get_stations_by_zone":
+            if _zone_match:
+                params["zone"] = int(_zone_match.group(1))
+            else:
+                try:
+                    params["zone"] = int(params.get("zone"))
+                except (TypeError, ValueError):
+                    params.pop("zone", None)
+
+        elif name == "search_policy":
+            # The router sometimes echoes the parameter schema instead of a query.
+            q = params.get("query")
+            params.clear()
+            params["query"] = q.strip() if isinstance(q, str) and q.strip() else user_message
+
     has_alternative_tool = any(
         call.get("name") == "find_alternative_routes"
         for call in tool_calls
+    )
+
+    has_service_delay_tool = any(
+        call.get("name") == "get_service_delays"
+        for call in tool_calls
+    )
+
+    # Historical delay-log query (distinct from the graph ripple-impact query):
+    # "were there delays on NR_SCH01", "delay history", "any late-running trains".
+    _is_service_delay = (
+        not _is_delay_impact
+        and not (_is_alternative and (len(_station_ids) >= 3 or len(_user_station_ids) >= 3))
+        and any(kw in _lower for kw in ["delay", "delayed", "delays", "late-running", "late running"])
+        and (
+            len(_schedule_ids) >= 1
+            or any(w in _lower for w in ["recent", "history", "past", "last month", "previous", "ever been"])
+        )
     )
 
     if _is_delay_impact:
@@ -962,6 +1036,14 @@ JSON:"""
             },
             "delay ripple impact query",
         )
+    elif _is_service_delay and not has_service_delay_tool:
+        params = {}
+        if _schedule_ids:
+            params["schedule_id"] = _schedule_ids[0]
+        _td = re.search(r'\d{4}-\d{2}-\d{2}', _lower)
+        if _td:
+            params["travel_date"] = _td.group(0)
+        _fallback("get_service_delays", params, "service delay history query")
     elif _is_alternative and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3):
         ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
 
