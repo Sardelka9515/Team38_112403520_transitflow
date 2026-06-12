@@ -14,8 +14,8 @@ from databases.relational.queries import (
     query_user_bookings,
     execute_booking,
     execute_cancellation,
-    query_policy_vector_search,
 )
+from skeleton.rag import hybrid_policy_search
 from databases.graph.queries import (
     query_shortest_route,
     query_cheapest_route,
@@ -358,17 +358,11 @@ def _execute_tool(
             result = data if ok else {"error": data}
 
         elif tool_name == "search_policy":
-            embedding = llm.embed(params["query"])
-            docs = query_policy_vector_search(embedding)
-            result = [
-                {
-                    "title":      d["title"],
-                    "category":   d["category"],
-                    "content":    d["content"][:800],
-                    "similarity": round(d["similarity"], 3),
-                }
-                for d in docs
-            ]
+            result = hybrid_policy_search(
+                query=params["query"],
+                llm=llm,
+                top_k=3,
+            )
 
         elif tool_name == "find_route":
             origin_id = params["origin_id"].upper()
@@ -474,6 +468,31 @@ def _format_route_answer(tool_name, result_json, user_message):
         data = json.loads(result_json)
     except json.JSONDecodeError:
         return None
+
+    if isinstance(data, dict) and data.get("error"):
+        return f"查詢時發生錯誤：{data['error']}"
+
+    if tool_name == "find_route" and isinstance(data, dict):
+        if data.get("found") is False:
+            return "找不到符合條件的有效路線。"
+
+        stations = data.get("path") or data.get("stations") or []
+        station_text = " → ".join(
+            f"{s.get('station_id', '')} {s.get('name', '')}".strip()
+            for s in stations
+            if isinstance(s, dict)
+        )
+
+        lines = []
+        if station_text:
+            lines.append(f"路線：{station_text}")
+
+        if data.get("total_time_min") is not None:
+            lines.append(f"總旅行時間：{data['total_time_min']} 分鐘")
+
+        if data.get("total_fare_usd") is not None:
+            lines.append(f"預估總費用：{data['total_fare_usd']} 美元")
+
     
     if not re.search(r"[\u4e00-\u9fff]", user_message):
         return None
@@ -865,6 +884,24 @@ JSON:"""
             },
             "delay ripple impact query",
         )
+    elif _is_alternative and (len(_user_station_ids) >= 3 or len(_station_ids) >= 3):
+        ids_for_alt = _user_station_ids if len(_user_station_ids) >= 3 else _station_ids
+
+        avoid_station_id = ids_for_alt[0].upper()
+        origin_id = ids_for_alt[1].upper()
+        destination_id = ids_for_alt[2].upper()
+
+        _fallback(
+            "find_alternative_routes",
+            {
+                "origin_id": origin_id,
+                "destination_id": destination_id,
+                "avoid_station_id": avoid_station_id,
+                "network": "auto",
+            },
+            "alternative/disruption route query",
+        )
+    elif _is_route and _two_stations:
 
     elif (
         _is_alternative
